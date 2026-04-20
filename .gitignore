@@ -1,0 +1,17 @@
+.venv/
+.ft_env/
+__pycache__/
+*.pyc
+
+cache/
+runs/
+logs/
+
+data/parsed_raw_records.jsonl
+data/parsed_raw_records_manifest.json
+data/sft_train.jsonl
+data/sft_val.jsonl
+data/sft_dataset_manifest.json
+data/baseline_val_outputs*.jsonl
+
+*.log
