@@ -1,9 +1,11 @@
 import argparse
+import inspect
 from pathlib import Path
 
+import unsloth
+from unsloth import FastLanguageModel, is_bfloat16_supported
 from datasets import load_dataset
 from trl import SFTConfig, SFTTrainer
-from unsloth import FastLanguageModel, is_bfloat16_supported
 
 
 TARGET_MODULES = [
@@ -115,36 +117,48 @@ def main() -> None:
 
     eval_strategy = "steps" if eval_dataset is not None else "no"
 
-    trainer = SFTTrainer(
-        model=model,
-        tokenizer=tokenizer,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        args=SFTConfig(
-            dataset_text_field="text",
-            max_seq_length=args.max_seq_length,
-            per_device_train_batch_size=args.per_device_batch_size,
-            gradient_accumulation_steps=args.gradient_accumulation_steps,
-            warmup_ratio=args.warmup_ratio,
-            num_train_epochs=args.num_train_epochs,
-            max_steps=args.max_steps,
-            learning_rate=args.learning_rate,
-            weight_decay=args.weight_decay,
-            logging_steps=args.logging_steps,
-            save_steps=args.save_steps,
-            eval_strategy=eval_strategy,
-            eval_steps=args.eval_steps,
-            save_total_limit=args.save_total_limit,
-            optim="adamw_8bit",
-            lr_scheduler_type="cosine",
-            seed=args.seed,
-            output_dir=str(output_dir),
-            report_to="none",
-            packing=False,
-            fp16=not is_bfloat16_supported(),
-            bf16=is_bfloat16_supported(),
-        ),
-    )
+    sft_config_kwargs = {
+        "dataset_text_field": "text",
+        "per_device_train_batch_size": args.per_device_batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "warmup_ratio": args.warmup_ratio,
+        "num_train_epochs": args.num_train_epochs,
+        "max_steps": args.max_steps,
+        "learning_rate": args.learning_rate,
+        "weight_decay": args.weight_decay,
+        "logging_steps": args.logging_steps,
+        "save_steps": args.save_steps,
+        "eval_strategy": eval_strategy,
+        "eval_steps": args.eval_steps,
+        "save_total_limit": args.save_total_limit,
+        "optim": "adamw_8bit",
+        "lr_scheduler_type": "cosine",
+        "seed": args.seed,
+        "output_dir": str(output_dir),
+        "report_to": "none",
+        "packing": False,
+        "fp16": not is_bfloat16_supported(),
+        "bf16": is_bfloat16_supported(),
+    }
+    sft_signature = inspect.signature(SFTConfig.__init__).parameters
+    if "max_seq_length" in sft_signature:
+        sft_config_kwargs["max_seq_length"] = args.max_seq_length
+    elif "max_length" in sft_signature:
+        sft_config_kwargs["max_length"] = args.max_seq_length
+
+    trainer_kwargs = {
+        "model": model,
+        "train_dataset": train_dataset,
+        "eval_dataset": eval_dataset,
+        "args": SFTConfig(**sft_config_kwargs),
+    }
+    trainer_signature = inspect.signature(SFTTrainer.__init__).parameters
+    if "tokenizer" in trainer_signature:
+        trainer_kwargs["tokenizer"] = tokenizer
+    elif "processing_class" in trainer_signature:
+        trainer_kwargs["processing_class"] = tokenizer
+
+    trainer = SFTTrainer(**trainer_kwargs)
 
     resume_from_checkpoint = latest_checkpoint(output_dir) if args.resume else None
     if resume_from_checkpoint:
