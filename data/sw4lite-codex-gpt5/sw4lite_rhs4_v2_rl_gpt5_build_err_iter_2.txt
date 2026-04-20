@@ -1,0 +1,966 @@
+CMake Deprecation Warning at CMakeLists.txt:1 (cmake_minimum_required):
+  Compatibility with CMake < 3.10 will be removed from a future version of
+  CMake.
+
+  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
+  to tell CMake that the project requires at least <min> but has been updated
+  to work with policies introduced by <max> or earlier.
+
+
+CMake Warning at CMakeLists.txt:4 (message):
+  This cmakefile only builds cuda version!
+
+
+CMake Warning (dev) in CMakeLists.txt:
+  Policy CMP0104 is not set: CMAKE_CUDA_ARCHITECTURES now detected for NVCC,
+  empty CUDA_ARCHITECTURES not allowed.  Run "cmake --help-policy CMP0104"
+  for policy details.  Use the cmake_policy command to set the policy and
+  suppress this warning.
+
+  CUDA_ARCHITECTURES is empty for target "sw4lite".
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) in CMakeLists.txt:
+  Policy CMP0104 is not set: CMAKE_CUDA_ARCHITECTURES now detected for NVCC,
+  empty CUDA_ARCHITECTURES not allowed.  Run "cmake --help-policy CMP0104"
+  for policy details.  Use the cmake_policy command to set the policy and
+  suppress this warning.
+
+  CUDA_ARCHITECTURES is empty for target "sw4lite".
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    CMAKE_C_COMPILER
+
+
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/sacsubc.C(133): warning #550-D: variable "nread" was set but never used
+   int maxpts, nread;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/sacsubc.C(213): warning #550-D: variable "nwrite" was set but never used
+   int nwrite;
+       ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/sacsubc.C(244): warning #177-D: variable "nread" was declared but never referenced
+   int maxpts, nread;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/sacsubc.C(245): warning #177-D: variable "j1" was declared but never referenced
+   int i, j, j1, j2, k, l;
+             ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/sacsubc.C(245): warning #177-D: variable "j2" was declared but never referenced
+   int i, j, j1, j2, k, l;
+                 ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/sacsubc.C(249): warning #177-D: variable "ival" was declared but never referenced
+   int ival;
+       ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/sacsubc.C(381): warning #177-D: variable "nwrite" was declared but never referenced
+   int nwrite;
+       ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/sacsubc.C(684): warning #177-D: variable "j" was declared but never referenced
+   int i,j;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/sacsubc.C(738): warning #177-D: variable "retval" was declared but never referenced
+   int retval;
+       ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/rhs4sg_rev.C(81): warning #177-D: variable "nic" was declared but never referenced
+     const int nic = 3*ni;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/rhs4sg_rev.C(82): warning #177-D: variable "nijc" was declared but never referenced
+     const int nijc = 3*nij;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/rhs4sg_rev.C(88): warning #177-D: variable "m" was declared but never referenced
+     int i, j, k, q, m, qb, mb;
+                     ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/sacsubc.C(99): warning #177-D: variable "NIVAL" was declared but never referenced
+  static int NIVAL=50;
+             ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/curvilinear-c.C(325): warning #550-D: variable "zz" was set but never used
+       double zp, zq, zr, zz;
+                          ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/curvilinear-c.C(409): warning #550-D: variable "zz" was set but never used
+       double zp, zq, zr, zz;
+                          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/curvilinear-c.C(394): warning #177-D: variable "nic" was declared but never referenced
+     const int nic = 4*ni;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/curvilinear-c.C(395): warning #177-D: variable "nijc" was declared but never referenced
+     const int nijc = 4*nij;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(478): warning #177-D: variable "n_int" was declared but never referenced
+      int n_int = m_nint;
+          ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(479): warning #177-D: variable "q_u" was declared but never referenced
+      int q_u = m_qu;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(480): warning #177-D: variable "q_v" was declared but never referenced
+      int q_v = m_qv;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(483): warning #550-D: variable "mu" was set but never used
+      double mu, lambda,rho;
+             ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(483): warning #550-D: variable "lambda" was set but never used
+      double mu, lambda,rho;
+                 ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(483): warning #550-D: variable "rho" was set but never used
+      double mu, lambda,rho;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(554): warning #550-D: variable "parameters" was set but never used
+          double parameters[11];
+                 ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(514): warning #177-D: variable "n_int" was declared but never referenced
+      int n_int = m_nint;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(515): warning #177-D: variable "q_u" was declared but never referenced
+      int q_u = m_qu;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(516): warning #177-D: variable "q_v" was declared but never referenced
+      int q_v = m_qv;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(601): warning #177-D: variable "n_int" was declared but never referenced
+      int n_int = m_nint;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(602): warning #177-D: variable "q_u" was declared but never referenced
+      int q_u = m_qu;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(603): warning #177-D: variable "q_v" was declared but never referenced
+      int q_v = m_qv;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(605): warning #550-D: variable "mu" was set but never used
+      double mu, lambda,rho;
+             ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(605): warning #550-D: variable "lambda" was set but never used
+      double mu, lambda,rho;
+                 ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(605): warning #550-D: variable "rho" was set but never used
+      double mu, lambda,rho;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(637): warning #177-D: variable "n_int_id" was declared but never referenced
+      int n_int_id = 3*m_nint;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(638): warning #177-D: variable "q_u" was declared but never referenced
+      int q_u = m_qu;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(639): warning #177-D: variable "q_v" was declared but never referenced
+      int q_v = m_qv;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(641): warning #550-D: variable "id_type" was set but never used
+      int id_type = 0;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(667): warning #177-D: variable "n_int" was declared but never referenced
+      int n_int = m_nint;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(668): warning #177-D: variable "q_u" was declared but never referenced
+      int q_u = m_qu;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(669): warning #177-D: variable "q_v" was declared but never referenced
+      int q_v = m_qv;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(672): warning #550-D: variable "mu" was set but never used
+      double mu, lambda,rho;
+             ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(672): warning #550-D: variable "lambda" was set but never used
+      double mu, lambda,rho;
+                 ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW-dg.C(672): warning #550-D: variable "rho" was set but never used
+      double mu, lambda,rho;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/TimeSeries.C(928): warning #177-D: variable "lat" was declared but never referenced
+     double lat, lon;
+            ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/TimeSeries.C(928): warning #177-D: variable "lon" was declared but never referenced
+     double lat, lon;
+                 ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/TimeSeries.C(929): warning #177-D: variable "x" was declared but never referenced
+     double x, y, z;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/TimeSeries.C(929): warning #177-D: variable "y" was declared but never referenced
+     double x, y, z;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/TimeSeries.C(929): warning #177-D: variable "z" was declared but never referenced
+     double x, y, z;
+                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1520): warning #177-D: variable "je" was declared but never referenced
+    int ie = u.m_ie, ib=u.m_ib, je=u.m_je, jb=u.m_jb, kb=u.m_kb;
+                                ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1521): warning #177-D: variable "status" was declared but never referenced
+    MPI_Status status;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1536): warning #177-D: variable "idx_left" was declared but never referenced
+    int idx_left = 0;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1537): warning #177-D: variable "idx_right" was declared but never referenced
+    int idx_right = n_m_ppadding2;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1565): warning #177-D: variable "ie" was declared but never referenced
+    int ie = u.m_ie, ib=u.m_ib, je=u.m_je, jb=u.m_jb, kb=u.m_kb;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1566): warning #177-D: variable "status" was declared but never referenced
+    MPI_Status status;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1583): warning #177-D: variable "idx_up" was declared but never referenced
+    int idx_up = 2*n_m_ppadding2;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1584): warning #177-D: variable "idx_down" was declared but never referenced
+    int idx_down = 2*n_m_ppadding2 + n_m_ppadding1;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1611): warning #177-D: variable "je" was declared but never referenced
+    int ie = u.m_ie, ib=u.m_ib, je=u.m_je, jb=u.m_jb, kb=u.m_kb;
+                                ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1612): warning #177-D: variable "status" was declared but never referenced
+    MPI_Status status;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1627): warning #177-D: variable "idx_left" was declared but never referenced
+    int idx_left = 0;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1628): warning #177-D: variable "idx_right" was declared but never referenced
+    int idx_right = n_m_ppadding2;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1657): warning #177-D: variable "ie" was declared but never referenced
+    int ie = u.m_ie, ib=u.m_ib, je=u.m_je, jb=u.m_jb, kb=u.m_kb;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1658): warning #177-D: variable "status" was declared but never referenced
+    MPI_Status status;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1675): warning #177-D: variable "idx_up" was declared but never referenced
+    int idx_up = 2*n_m_ppadding2;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1676): warning #177-D: variable "idx_down" was declared but never referenced
+    int idx_down = 2*n_m_ppadding2 + n_m_ppadding1;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1730): warning #177-D: variable "ytag1" was declared but never referenced
+        int ytag1 = 347;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1731): warning #177-D: variable "ytag2" was declared but never referenced
+        int ytag2 = 348;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1745): warning #177-D: variable "ytag1" was declared but never referenced
+        int ytag1 = 347;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1746): warning #177-D: variable "ytag2" was declared but never referenced
+        int ytag2 = 348;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1704): warning #177-D: variable "je" was declared but never referenced
+     int ie = u.m_ie, ib=u.m_ib, je=u.m_je, jb=u.m_jb, kb=u.m_kb;
+                                 ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1707): warning #550-D: variable "gridsize" was set but never used
+     dim3 gridsize, blocksize;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1707): warning #550-D: variable "blocksize" was set but never used
+     dim3 gridsize, blocksize;
+                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1721): warning #177-D: variable "idx_left" was declared but never referenced
+     int idx_left = 0;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1722): warning #177-D: variable "idx_right" was declared but never referenced
+     int idx_right = n_m_ppadding2;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1879): warning #177-D: variable "xtag1" was declared but never referenced
+        int xtag1 = 345;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1880): warning #177-D: variable "xtag2" was declared but never referenced
+        int xtag2 = 346;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1894): warning #177-D: variable "xtag1" was declared but never referenced
+        int xtag1 = 345;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1895): warning #177-D: variable "xtag2" was declared but never referenced
+        int xtag2 = 346;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1855): warning #177-D: variable "ie" was declared but never referenced
+     int ie = u.m_ie, ib=u.m_ib, je=u.m_je, jb=u.m_jb, kb=u.m_kb;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1858): warning #550-D: variable "gridsize" was set but never used
+     dim3 gridsize, blocksize;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1858): warning #550-D: variable "blocksize" was set but never used
+     dim3 gridsize, blocksize;
+                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1874): warning #177-D: variable "idx_up" was declared but never referenced
+     int idx_up = 2*n_m_ppadding2;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/EW_cuda.C(1875): warning #177-D: variable "idx_down" was declared but never referenced
+     int idx_down = 2*n_m_ppadding2 + n_m_ppadding1;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(1737): warning #177-D: variable "nijk" was declared but never referenced
+    const size_t nijk = nij*(klast-kfirst+1);
+                 ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2419): warning #177-D: variable "nijk" was declared but never referenced
+     const int nijk = nij*(klast-kfirst+1);
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2429): warning #177-D: variable "kfirst0" was declared but never referenced
+     const int kfirst0 = kfirst;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2430): warning #177-D: variable "mux1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2430): warning #177-D: variable "mux2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2430): warning #177-D: variable "mux3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2430): warning #177-D: variable "mux4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2430): warning #177-D: variable "muy1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2430): warning #177-D: variable "muy2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2430): warning #177-D: variable "muy3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2430): warning #177-D: variable "muy4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                      ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2430): warning #177-D: variable "muz1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2430): warning #177-D: variable "muz2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2430): warning #177-D: variable "muz3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2430): warning #177-D: variable "muz4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2431): warning #177-D: variable "r1" was declared but never referenced
+     double r1, r2, r3, cof;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2431): warning #177-D: variable "r2" was declared but never referenced
+     double r1, r2, r3, cof;
+                ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2431): warning #177-D: variable "r3" was declared but never referenced
+     double r1, r2, r3, cof;
+                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(2431): warning #177-D: variable "cof" was declared but never referenced
+     double r1, r2, r3, cof;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3342): warning #177-D: variable "kfirst0" was declared but never referenced
+     const int kfirst0 = kfirst;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3343): warning #177-D: variable "mux1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3343): warning #177-D: variable "mux2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3343): warning #177-D: variable "mux3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3343): warning #177-D: variable "mux4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3343): warning #177-D: variable "muy1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3343): warning #177-D: variable "muy2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3343): warning #177-D: variable "muy3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3343): warning #177-D: variable "muy4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                      ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3343): warning #177-D: variable "muz1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3343): warning #177-D: variable "muz2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3343): warning #177-D: variable "muz3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3343): warning #177-D: variable "muz4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3344): warning #177-D: variable "r1" was declared but never referenced
+     double r1, r2, r3, cof;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3344): warning #177-D: variable "r2" was declared but never referenced
+     double r1, r2, r3, cof;
+                ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3344): warning #177-D: variable "r3" was declared but never referenced
+     double r1, r2, r3, cof;
+                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(3344): warning #177-D: variable "cof" was declared but never referenced
+     double r1, r2, r3, cof;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4252): warning #177-D: variable "kfirst0" was declared but never referenced
+     const int kfirst0 = kfirst;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4253): warning #177-D: variable "mux1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4253): warning #177-D: variable "mux2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4253): warning #177-D: variable "mux3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4253): warning #177-D: variable "mux4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4253): warning #177-D: variable "muy1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4253): warning #177-D: variable "muy2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4253): warning #177-D: variable "muy3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4253): warning #177-D: variable "muy4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                      ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4253): warning #177-D: variable "muz1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4253): warning #177-D: variable "muz2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4253): warning #177-D: variable "muz3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4253): warning #177-D: variable "muz4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4254): warning #177-D: variable "r1" was declared but never referenced
+     double r1, r2, r3, cof;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4254): warning #177-D: variable "r2" was declared but never referenced
+     double r1, r2, r3, cof;
+                ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4254): warning #177-D: variable "r3" was declared but never referenced
+     double r1, r2, r3, cof;
+                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(4254): warning #177-D: variable "cof" was declared but never referenced
+     double r1, r2, r3, cof;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5091): warning #177-D: variable "nijk" was declared but never referenced
+     const int nijk = nij*(klast-kfirst+1);
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5101): warning #177-D: variable "kfirst0" was declared but never referenced
+     const int kfirst0 = kfirst;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5102): warning #177-D: variable "mux1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5102): warning #177-D: variable "mux2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5102): warning #177-D: variable "mux3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5102): warning #177-D: variable "mux4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5102): warning #177-D: variable "muy1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5102): warning #177-D: variable "muy2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5102): warning #177-D: variable "muy3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5102): warning #177-D: variable "muy4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                      ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5102): warning #177-D: variable "muz1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5102): warning #177-D: variable "muz2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5102): warning #177-D: variable "muz3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5102): warning #177-D: variable "muz4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5103): warning #177-D: variable "r1" was declared but never referenced
+     double r1, r2, r3, cof;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5103): warning #177-D: variable "r2" was declared but never referenced
+     double r1, r2, r3, cof;
+                ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5103): warning #177-D: variable "r3" was declared but never referenced
+     double r1, r2, r3, cof;
+                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5103): warning #177-D: variable "cof" was declared but never referenced
+     double r1, r2, r3, cof;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5950): warning #177-D: variable "kfirst0" was declared but never referenced
+     const int kfirst0 = kfirst;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5951): warning #177-D: variable "mux1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5951): warning #177-D: variable "mux2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5951): warning #177-D: variable "mux3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5951): warning #177-D: variable "mux4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5951): warning #177-D: variable "muy1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5951): warning #177-D: variable "muy2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5951): warning #177-D: variable "muy3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5951): warning #177-D: variable "muy4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                      ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5951): warning #177-D: variable "muz1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5951): warning #177-D: variable "muz2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5951): warning #177-D: variable "muz3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5951): warning #177-D: variable "muz4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5952): warning #177-D: variable "r1" was declared but never referenced
+     double r1, r2, r3, cof;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5952): warning #177-D: variable "r2" was declared but never referenced
+     double r1, r2, r3, cof;
+                ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5952): warning #177-D: variable "r3" was declared but never referenced
+     double r1, r2, r3, cof;
+                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(5952): warning #177-D: variable "cof" was declared but never referenced
+     double r1, r2, r3, cof;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6478): warning #177-D: variable "nijk" was declared but never referenced
+     const int nijk = nij*(klast-kfirst+1);
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6488): warning #177-D: variable "kfirst0" was declared but never referenced
+     const int kfirst0 = kfirst;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6489): warning #177-D: variable "mux1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6489): warning #177-D: variable "mux2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6489): warning #177-D: variable "mux3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6489): warning #177-D: variable "mux4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6489): warning #177-D: variable "muy1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6489): warning #177-D: variable "muy2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6489): warning #177-D: variable "muy3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6489): warning #177-D: variable "muy4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                      ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6489): warning #177-D: variable "muz1" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6489): warning #177-D: variable "muz2" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6489): warning #177-D: variable "muz3" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6489): warning #177-D: variable "muz4" was declared but never referenced
+     double mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4, muz1, muz2, muz3, muz4;
+                                                                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6490): warning #177-D: variable "r1" was declared but never referenced
+     double r1, r2, r3, cof;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6490): warning #177-D: variable "r2" was declared but never referenced
+     double r1, r2, r3, cof;
+                ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6490): warning #177-D: variable "r3" was declared but never referenced
+     double r1, r2, r3, cof;
+                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(6490): warning #177-D: variable "cof" was declared but never referenced
+     double r1, r2, r3, cof;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(7017): warning #177-D: variable "nijk" was declared but never referenced
+    const int nijk = nij*(klast-kfirst+1);
+              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(7363): warning #177-D: variable "nic" was declared but never referenced
+    const int nic = 3*ni;
+              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(7364): warning #177-D: variable "nijc" was declared but never referenced
+    const int nijc = 3*nij;
+              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8360): warning #177-D: variable "njk" was declared but never referenced
+     int njk = nj*nk;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8361): warning #177-D: variable "idx_halo" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8415): warning #177-D: variable "njk" was declared but never referenced
+     int njk = nj*nk;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8416): warning #177-D: variable "idx_halo" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8416): warning #177-D: variable "i" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8448): warning #177-D: variable "njk" was declared but never referenced
+     int njk = nj*nk;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8449): warning #177-D: variable "idx_halo" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8504): warning #177-D: variable "njk" was declared but never referenced
+     int njk = nj*nk;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8505): warning #177-D: variable "idx_halo" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8558): warning #177-D: variable "njk" was declared but never referenced
+     int njk = nj*nk;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8559): warning #177-D: variable "idx_halo" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8559): warning #177-D: variable "i" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8591): warning #177-D: variable "njk" was declared but never referenced
+     int njk = nj*nk;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8592): warning #177-D: variable "idx_halo" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8664): warning #177-D: variable "kfirst0" was declared but never referenced
+     const int kfirst0 = kfirst;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(8802): warning #177-D: variable "kfirst0" was declared but never referenced
+     const int kfirst0 = kfirst;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(13504): warning #177-D: variable "idx_halo" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(13537): warning #177-D: variable "njk" was declared but never referenced
+     int njk = nj*nk;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(13538): warning #177-D: variable "idx_halo" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(13572): warning #177-D: variable "idx_halo" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(13572): warning #177-D: variable "i" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(13604): warning #177-D: variable "idx_halo" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(13604): warning #177-D: variable "i" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(13635): warning #177-D: variable "idx_halo" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(13668): warning #177-D: variable "idx_halo" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(13700): warning #177-D: variable "idx_halo" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(13700): warning #177-D: variable "i" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(13733): warning #177-D: variable "idx_halo" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                              ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(13733): warning #177-D: variable "i" was declared but never referenced
+     int n_m_padding, istart, idx_halo, i, idx, j;
+                                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(12633): warning #177-D: variable "old_up" was declared but never referenced
+    double u_km2[3], u_km1[3], old_up[3];
+                               ^
+
+--------------------------------------------------------------------------
+WARNING: There was an error initializing an OpenFabrics device.
+
+  Local host:   voltar
+  Local device: mlx5_2
+--------------------------------------------------------------------------

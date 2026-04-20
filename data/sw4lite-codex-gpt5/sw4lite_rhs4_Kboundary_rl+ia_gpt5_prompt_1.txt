@@ -1,0 +1,524 @@
+# Begin Source Code
+```cpp```
+1: __global__ void rhs4_Kboundary (int ifirst, int ilast, int jfirst, int jlast,
+2: 			   int ni, int nj, int nk, int nz,
+3: 			   float_sw4* __restrict__ a_up,
+4: 			   const float_sw4* __restrict__ a_u,
+5: 			   const float_sw4* __restrict__ a_um,
+6: 			   const float_sw4* __restrict__ a_mu,
+7: 			   const float_sw4* __restrict__ a_lambda,
+8: 			   const float_sw4* __restrict__ a_rho,
+9: 			   const float_sw4* __restrict__ a_fo,
+10: 			   const float_sw4* __restrict__ a_strx,
+11: 			   const float_sw4* __restrict__ a_stry,
+12: 			   const float_sw4 h,
+13: 			   const float_sw4 dt) {
+14:   int index;
+15:   const float_sw4 i6   = 1.0 / 6;
+16:   const float_sw4 i12  = 1.0 / 12;
+17:   const float_sw4 i144 = 1.0 / 144;
+18:   const float_sw4 tf   = 0.75;
+19:
+20:   float_sw4 mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4;
+21:   float_sw4 r1, r2, r3, cof, mu1zz, mu2zz, mu3zz;
+22:   float_sw4 u3zip2, u3zip1, u3zim1, u3zim2, lau3zx, mu3xz, u3zjp2, u3zjp1, u3zjm1, u3zjm2;
+23:   float_sw4 lau3zy, mu3yz, mu1zx, mu2zy, u1zip2, u1zip1, u1zim1, u1zim2;
+24:   float_sw4 u2zjp2, u2zjp1, u2zjm1, u2zjm2, lau1xz, lau2yz;
+25:
+26:   float_sw4 strx_im2, strx_im1, strx_i, strx_ip1, strx_ip2;
+27:   float_sw4 stry_jm2, stry_jm1, stry_j, stry_jp1, stry_jp2;
+28:
+29:   int active=0, loadx1=0, loadx2=0, loady1=0, loady2=0, loady3=0;
+30:
+31:   __shared__ float_sw4 shu[3][8][2+4][UX+4];
+32:   __shared__ float_sw4 shl[8][2+4][UX+4];
+33:   __shared__ float_sw4 shm[8][2+4][UX+4];
+34:
+35:   const int i = threadIdx.x + blockIdx.x * UX;
+36:   const int j = jfirst + threadIdx.y + blockIdx.y * 2;
+37:   int k;
+38:
+39:   if(low)
+40:     k = threadIdx.z;
+41:   else
+42:     k = nz-6;
+43:
+44:   const int ti = threadIdx.x + 2;
+45:   const int tj = threadIdx.y + 2;
+46:   const int tk = threadIdx.z;
+47:
+48:   const int nij = ni * nj;
+49:   const int nijk = nij * nk;
+50:
+51:   if (i >= ifirst && i <= ilast && j <= jlast)
+52:     active = 1;
+53:
+54:   if (i-2 >= 0 && i-2 < ni)
+55:     loadx1 = 1;
+56:   if (threadIdx.x < 4 && i-2+UX < ni)
+57:     loadx2 = 1;
+58:   if (j-2 < nj)
+59:     loady1 = 1;
+60:   if (j < nj)
+61:     loady2 = 1;
+62:   if (j+2 < nj)
+63:     loady3 = 1;
+64:
+65:   float_sw4 u0, u1, u2;
+66:   if(low)
+67:   {
+68:     index = 1 * nij + j * ni + i;
+69:     u0 = u(0,index);
+70:     u1 = u(1,index);
+71:     u2 = u(2,index);
+72:   }
+73:   else
+74:   {
+75:     index = (nz+1) * nij + j * ni + i;
+76:     u0 = u(0,index);
+77:     u1 = u(1,index);
+78:     u2 = u(2,index);
+79:   }
+80:
+81:   index = (k + 2) * nij + (j - 2) * ni + i - 2;
+82:
+83:   if (loady1) {
+84:     int idx = index;
+85:     if (loadx1) {
+86:       shu[0][threadIdx.z][threadIdx.y][threadIdx.x] = u(0,idx);
+87:       shu[1][threadIdx.z][threadIdx.y][threadIdx.x] = u(1,idx);
+88:       shu[2][threadIdx.z][threadIdx.y][threadIdx.x] = u(2,idx);
+89:       shl[threadIdx.z][threadIdx.y][threadIdx.x] = a_lambda[idx];
+90:       shm[threadIdx.z][threadIdx.y][threadIdx.x] = a_mu[idx];
+91:     }
+92:     if (loadx2) {
+93:       shu[0][threadIdx.z][threadIdx.y][threadIdx.x+UX] = u(0,idx+UX);
+94:       shu[1][threadIdx.z][threadIdx.y][threadIdx.x+UX] = u(1,idx+UX);
+95:       shu[2][threadIdx.z][threadIdx.y][threadIdx.x+UX] = u(2,idx+UX);
+96:       shl[threadIdx.z][threadIdx.y][threadIdx.x+UX] = a_lambda[idx+UX];
+97:       shm[threadIdx.z][threadIdx.y][threadIdx.x+UX] = a_mu[idx+UX];
+98:     }
+99:     if (threadIdx.z < 2) {
+100:       idx += 6 * nij;
+101:       if (loadx1) {
+102: 	shu[0][threadIdx.z+6][threadIdx.y][threadIdx.x] = u(0,idx);
+103: 	shu[1][threadIdx.z+6][threadIdx.y][threadIdx.x] = u(1,idx);
+104: 	shu[2][threadIdx.z+6][threadIdx.y][threadIdx.x] = u(2,idx);
+105: 	shl[threadIdx.z+6][threadIdx.y][threadIdx.x] = a_lambda[idx];
+106: 	shm[threadIdx.z+6][threadIdx.y][threadIdx.x] = a_mu[idx];
+107:       }
+108:       if (loadx2) {
+109: 	shu[0][threadIdx.z+6][threadIdx.y][threadIdx.x+UX] = u(0,idx+UX);
+110: 	shu[1][threadIdx.z+6][threadIdx.y][threadIdx.x+UX] = u(1,idx+UX);
+111: 	shu[2][threadIdx.z+6][threadIdx.y][threadIdx.x+UX] = u(2,idx+UX);
+112: 	shl[threadIdx.z+6][threadIdx.y][threadIdx.x+UX] = a_lambda[idx+UX];
+113: 	shm[threadIdx.z+6][threadIdx.y][threadIdx.x+UX] = a_mu[idx+UX];
+114:       }
+115:     }
+116:   }
+117:
+118:   if (loady2) {
+119:     int idx = index + 2 * ni;
+120:     if (loadx1) {
+121:       shu[0][threadIdx.z][threadIdx.y+2][threadIdx.x] = u(0,idx);
+122:       shu[1][threadIdx.z][threadIdx.y+2][threadIdx.x] = u(1,idx);
+123:       shu[2][threadIdx.z][threadIdx.y+2][threadIdx.x] = u(2,idx);
+124:       shl[threadIdx.z][threadIdx.y+2][threadIdx.x] = a_lambda[idx];
+125:       shm[threadIdx.z][threadIdx.y+2][threadIdx.x] = a_mu[idx];
+126:     }
+127:     if (loadx2) {
+128:       shu[0][threadIdx.z][threadIdx.y+2][threadIdx.x+UX] = u(0,idx+UX);
+129:       shu[1][threadIdx.z][threadIdx.y+2][threadIdx.x+UX] = u(1,idx+UX);
+130:       shu[2][threadIdx.z][threadIdx.y+2][threadIdx.x+UX] = u(2,idx+UX);
+131:       shl[threadIdx.z][threadIdx.y+2][threadIdx.x+UX] = a_lambda[idx+UX];
+132:       shm[threadIdx.z][threadIdx.y+2][threadIdx.x+UX] = a_mu[idx+UX];
+133:     }
+134:     if (threadIdx.z < 2) {
+135:       idx += 6 * nij;
+136:       if (loadx1) {
+137: 	shu[0][threadIdx.z+6][threadIdx.y+2][threadIdx.x] = u(0,idx);
+138: 	shu[1][threadIdx.z+6][threadIdx.y+2][threadIdx.x] = u(1,idx);
+139: 	shu[2][threadIdx.z+6][threadIdx.y+2][threadIdx.x] = u(2,idx);
+140: 	shl[threadIdx.z+6][threadIdx.y+2][threadIdx.x] = a_lambda[idx];
+141: 	shm[threadIdx.z+6][threadIdx.y+2][threadIdx.x] = a_mu[idx];
+142:       }
+143:       if (loadx2) {
+144: 	shu[0][threadIdx.z+6][threadIdx.y+2][threadIdx.x+UX] = u(0,idx+UX);
+145: 	shu[1][threadIdx.z+6][threadIdx.y+2][threadIdx.x+UX] = u(1,idx+UX);
+146: 	shu[2][threadIdx.z+6][threadIdx.y+2][threadIdx.x+UX] = u(2,idx+UX);
+147: 	shl[threadIdx.z+6][threadIdx.y+2][threadIdx.x+UX] = a_lambda[idx+UX];
+148: 	shm[threadIdx.z+6][threadIdx.y+2][threadIdx.x+UX] = a_mu[idx+UX];
+149:       }
+150:     }
+151:   }
+152:
+153:   if (loady3) {
+154:     int idx = index + 4 * ni;
+155:     if (loadx1) {
+156:       shu[0][threadIdx.z][threadIdx.y+4][threadIdx.x] = u(0,idx);
+157:       shu[1][threadIdx.z][threadIdx.y+4][threadIdx.x] = u(1,idx);
+158:       shu[2][threadIdx.z][threadIdx.y+4][threadIdx.x] = u(2,idx);
+159:       shl[threadIdx.z][threadIdx.y+4][threadIdx.x] = a_lambda[idx];
+160:       shm[threadIdx.z][threadIdx.y+4][threadIdx.x] = a_mu[idx];
+161:     }
+162:     if (loadx2) {
+163:       shu[0][threadIdx.z][threadIdx.y+4][threadIdx.x+UX] = u(0,idx+UX);
+164:       shu[1][threadIdx.z][threadIdx.y+4][threadIdx.x+UX] = u(1,idx+UX);
+165:       shu[2][threadIdx.z][threadIdx.y+4][threadIdx.x+UX] = u(2,idx+UX);
+166:       shl[threadIdx.z][threadIdx.y+4][threadIdx.x+UX] = a_lambda[idx+UX];
+167:       shm[threadIdx.z][threadIdx.y+4][threadIdx.x+UX] = a_mu[idx+UX];
+168:     }
+169:     if (threadIdx.z < 2) {
+170:       idx += 6 * nij;
+171:       if (loadx1) {
+172: 	shu[0][threadIdx.z+6][threadIdx.y+4][threadIdx.x] = u(0,idx);
+173: 	shu[1][threadIdx.z+6][threadIdx.y+4][threadIdx.x] = u(1,idx);
+174: 	shu[2][threadIdx.z+6][threadIdx.y+4][threadIdx.x] = u(2,idx);
+175: 	shl[threadIdx.z+6][threadIdx.y+4][threadIdx.x] = a_lambda[idx];
+176: 	shm[threadIdx.z+6][threadIdx.y+4][threadIdx.x] = a_mu[idx];
+177:       }
+178:       if (loadx2) {
+179: 	shu[0][threadIdx.z+6][threadIdx.y+4][threadIdx.x+UX] = u(0,idx+UX);
+180: 	shu[1][threadIdx.z+6][threadIdx.y+4][threadIdx.x+UX] = u(1,idx+UX);
+181: 	shu[2][threadIdx.z+6][threadIdx.y+4][threadIdx.x+UX] = u(2,idx+UX);
+182: 	shl[threadIdx.z+6][threadIdx.y+4][threadIdx.x+UX] = a_lambda[idx+UX];
+183: 	shm[threadIdx.z+6][threadIdx.y+4][threadIdx.x+UX] = a_mu[idx+UX];
+184:       }
+185:     }
+186:   }
+187:   __syncthreads();
+188:
+189:   if (active) {
+190:
+191:     strx_im2 = a_strx[i-2];
+192:     strx_im1 = a_strx[i-1];
+193:     strx_i   = a_strx[i];
+194:     strx_ip1 = a_strx[i+1];
+195:     strx_ip2 = a_strx[i+2];
+196:
+197:     stry_jm2 = a_stry[j-2];
+198:     stry_jm1 = a_stry[j-1];
+199:     stry_j   = a_stry[j];
+200:     stry_jp1 = a_stry[j+1];
+201:     stry_jp2 = a_stry[j+2];
+202:
+203:     cof = 1.0 / (h * h);
+204:     mux1 = shm[tk][tj][ti-1] * strx_im1 - tf *
+205:       (shm[tk][tj][ti] * strx_i + shm[tk][tj][ti-2] * strx_im2);
+206:     mux2 = shm[tk][tj][ti-2] * strx_im2 + shm[tk][tj][ti+1] * strx_ip1 + 3 *
+207:       (shm[tk][tj][ti] * strx_i + shm[tk][tj][ti-1] * strx_im1);
+208:     mux3 = shm[tk][tj][ti-1] * strx_im1 + shm[tk][tj][ti+2] * strx_ip2 + 3 *
+209:       (shm[tk][tj][ti+1] * strx_ip1 + shm[tk][tj][ti] * strx_i);
+210:     mux4 = shm[tk][tj][ti+1] * strx_ip1 - tf *
+211:       (shm[tk][tj][ti]* strx_i + shm[tk][tj][ti+2] * strx_ip2);
+212:
+213:     muy1 = shm[tk][tj-1][ti] * stry_jm1 - tf *
+214:       (shm[tk][tj][ti]* stry_j + shm[tk][tj-2][ti] * stry_jm2);
+215:     muy2 = shm[tk][tj-2][ti] * stry_jm2 + shm[tk][tj+1][ti] * stry_jp1 + 3 *
+216:       (shm[tk][tj][ti] * stry_j + shm[tk][tj-1][ti] * stry_jm1);
+217:     muy3 = shm[tk][tj-1][ti] * stry_jm1 + shm[tk][tj+2][ti] * stry_jp2 + 3 *
+218:       (shm[tk][tj+1][ti] * stry_jp1 + shm[tk][tj][ti] * stry_j);
+219:     muy4 = shm[tk][tj+1][ti] * stry_jp1 - tf *
+220:       (shm[tk][tj][ti]* stry_j + shm[tk][tj+2][ti] * stry_jp2);
+221:
+222:     r1 = i6 * (strx_i *
+223: 	       ((2 * mux1 + shl[tk][tj][ti-1] * strx_im1 - tf *
+224: 		 (shl[tk][tj][ti] * strx_i + shl[tk][tj][ti-2] * strx_im2)) *
+225: 		(shu[0][tk][tj][ti-2] - shu[0][tk][tj][ti]) +
+226: 		(2 * mux2 + shl[tk][tj][ti-2] * strx_im2 + shl[tk][tj][ti+1] * strx_ip1 + 3 *
+227: 		 (shl[tk][tj][ti] * strx_i + shl[tk][tj][ti-1] * strx_im1)) *
+228: 		(shu[0][tk][tj][ti-1] - shu[0][tk][tj][ti]) +
+229: 		(2 * mux3 + shl[tk][tj][ti-1] * strx_im1 + shl[tk][tj][ti+2] * strx_ip2 + 3 *
+230: 		 (shl[tk][tj][ti+1] * strx_ip1 + shl[tk][tj][ti] * strx_i)) *
+231: 		(shu[0][tk][tj][ti+1] - shu[0][tk][tj][ti]) +
+232:                 (2 * mux4 + shl[tk][tj][ti+1] * strx_ip1 - tf *
+233: 		 (shl[tk][tj][ti] * strx_i + shl[tk][tj][ti+2] * strx_ip2)) *
+234: 		(shu[0][tk][tj][ti+2] - shu[0][tk][tj][ti]) ) +
+235: 	       stry_j * (muy1 * (shu[0][tk][tj-2][ti] - shu[0][tk][tj][ti]) +
+236: 			    muy2 * (shu[0][tk][tj-1][ti] - shu[0][tk][tj][ti]) +
+237: 			    muy3 * (shu[0][tk][tj+1][ti] - shu[0][tk][tj][ti]) +
+238: 			    muy4 * (shu[0][tk][tj+2][ti] - shu[0][tk][tj][ti]) ) );
+239:
+240:     mu1zz = 0;
+241:     mu2zz = 0;
+242:     mu3zz = 0;
+243:     for (int q=0; q<8; q++) {
+244:       int qi = (low)? q: (7-q);
+245:       float_sw4 lap2mu = 0;
+246:       float_sw4 mucof  = 0;
+247:       int idx = q * 6 + k;
+248:       for (int m=0 ; m<8; m++) {
+249:         int mi = (low)? m: (7-m);
+250: 	mucof  += dev_acof[idx] * shm[mi][tj][ti];
+251: 	lap2mu += dev_acof[idx] * (shl[mi][tj][ti] + 2 * shm[mi][tj][ti]);
+252: 	idx += 48;
+253:       }
+254:       mu1zz += mucof * shu[0][qi][tj][ti];
+255:       mu2zz += mucof * shu[1][qi][tj][ti];
+256:       mu3zz += lap2mu * shu[2][qi][tj][ti];
+257:     }
+258:
+259:     if(low)
+260:       r1 += mu1zz + dev_ghcof[k] * shm[0][tj][ti] * u0;
+261:     else
+262:       r1 += mu1zz + dev_ghcof[k] * shm[7][tj][ti] * u0;
+263:
+264:     r2 = i6 * (strx_i *
+265: 	       (mux1 * (shu[1][tk][tj][ti-2] - shu[1][tk][tj][ti]) +
+266: 		mux2 * (shu[1][tk][tj][ti-1] - shu[1][tk][tj][ti]) +
+267: 		mux3 * (shu[1][tk][tj][ti+1] - shu[1][tk][tj][ti]) +
+268: 		mux4 * (shu[1][tk][tj][ti+2] - shu[1][tk][tj][ti]) ) +
+269: 	       stry_j *
+270: 	       ((2 * muy1 + shl[tk][tj-1][ti] * stry_jm1 - tf *
+271: 		 (shl[tk][tj][ti] * stry_j + shl[tk][tj-2][ti] * stry_jm2)) *
+272: 		(shu[1][tk][tj-2][ti] - shu[1][tk][tj][ti]) +
+273: 		(2 * muy2 + shl[tk][tj-2][ti] * stry_jm2 + shl[tk][tj+1][ti] * stry_jp1 + 3 *
+274: 		 (shl[tk][tj][ti] * stry_j + shl[tk][tj-1][ti] * stry_jm1)) *
+275: 		(shu[1][tk][tj-1][ti] - shu[1][tk][tj][ti]) +
+276: 		(2 * muy3 + shl[tk][tj-1][ti] * stry_jm1 + shl[tk][tj+2][ti] * stry_jp2 + 3 *
+277: 		 (shl[tk][tj+1][ti] * stry_jp1 + shl[tk][tj][ti] * stry_j)) *
+278: 		(shu[1][tk][tj+1][ti] - shu[1][tk][tj][ti]) +
+279: 		(2 * muy4 + shl[tk][tj+1][ti] * stry_jp1 - tf *
+280: 		 (shl[tk][tj][ti] * stry_j + shl[tk][tj+2][ti] * stry_jp2)) *
+281: 		(shu[1][tk][tj+2][ti] - shu[1][tk][tj][ti]) ) );
+282:
+283:     if(low)
+284:       r2 += mu2zz + dev_ghcof[k] * shm[0][tj][ti] * u1;
+285:     else
+286:       r2 += mu2zz + dev_ghcof[k] * shm[7][tj][ti] * u1;
+287:
+288:     r3 = i6 * (strx_i * (mux1 * (shu[2][tk][tj][ti-2] - shu[2][tk][tj][ti]) +
+289: 			    mux2 * (shu[2][tk][tj][ti-1] - shu[2][tk][tj][ti]) +
+290: 			    mux3 * (shu[2][tk][tj][ti+1] - shu[2][tk][tj][ti]) +
+291: 			    mux4 * (shu[2][tk][tj][ti+2] - shu[2][tk][tj][ti])  ) +
+292: 	       stry_j * (muy1 * (shu[2][tk][tj-2][ti] - shu[2][tk][tj][ti]) +
+293: 			    muy2 * (shu[2][tk][tj-1][ti] - shu[2][tk][tj][ti]) +
+294: 			    muy3 * (shu[2][tk][tj+1][ti] - shu[2][tk][tj][ti]) +
+295: 			    muy4 * (shu[2][tk][tj+2][ti] - shu[2][tk][tj][ti]) ) );
+296:
+297:     if(low)
+298:       r3 += mu3zz + dev_ghcof[k] * (shl[0][tj][ti] + 2 * shm[0][tj][ti]) * u2;
+299:     else
+300:       r3 += mu3zz + dev_ghcof[k] * (shl[7][tj][ti] + 2 * shm[7][tj][ti]) * u2;
+301:
+302:     r1 = r1 + strx_i * stry_j *
+303:       (i144 * (shl[tk][tj][ti-2] * (shu[1][tk][tj-2][ti-2] - shu[1][tk][tj+2][ti-2] + 8 *
+304: 					(-shu[1][tk][tj-1][ti-2] + shu[1][tk][tj+1][ti-2])) - 8 *
+305: 	       (shl[tk][tj][ti-1] * (shu[1][tk][tj-2][ti-1] - shu[1][tk][tj+2][ti-1] + 8 *
+306: 					 (-shu[1][tk][tj-1][ti-1] + shu[1][tk][tj+1][ti-1])) )+ 8 *
+307: 	       (shl[tk][tj][ti+1] * (shu[1][tk][tj-2][ti+1] - shu[1][tk][tj+2][ti+1] + 8 *
+308: 					 (-shu[1][tk][tj-1][ti+1] + shu[1][tk][tj+1][ti+1])) ) -
+309: 	       (shl[tk][tj][ti+2] * (shu[1][tk][tj-2][ti+2] - shu[1][tk][tj+2][ti+2] + 8 *
+310: 					 (-shu[1][tk][tj-1][ti+2] + shu[1][tk][tj+1][ti+2])) ))
+311:
+312:        + i144 * (shm[tk][tj-2][ti] * (shu[1][tk][tj-2][ti-2] - shu[1][tk][tj-2][ti+2] + 8 *
+313: 					  (-shu[1][tk][tj-2][ti-1] + shu[1][tk][tj-2][ti+1])) - 8 *
+314: 		 (shm[tk][tj-1][ti] * (shu[1][tk][tj-1][ti-2] - shu[1][tk][tj-1][ti+2] + 8 *
+315: 					   (-shu[1][tk][tj-1][ti-1] + shu[1][tk][tj-1][ti+1])) ) + 8 *
+316: 		 (shm[tk][tj+1][ti] * (shu[1][tk][tj+1][ti-2] - shu[1][tk][tj+1][ti+2] + 8 *
+317: 					   (-shu[1][tk][tj+1][ti-1] + shu[1][tk][tj+1][ti+1])) ) -
+318: 		 (shm[tk][tj+2][ti] * (shu[1][tk][tj+2][ti-2] - shu[1][tk][tj+2][ti+2] + 8 *
+319: 					   (-shu[1][tk][tj+2][ti-1] + shu[1][tk][tj+2][ti+1])) )) );
+320:
+321:     u3zip2 = 0;
+322:     u3zip1 = 0;
+323:     u3zim1 = 0;
+324:     u3zim2 = 0;
+325:     for (int q=0; q<8; q++) {
+326:       int qi = (low) ? q : (7-q);
+327:       float_sw4 bope = dev_bope[q*6+k];
+328:       u3zip2 += bope * shu[2][qi][tj][ti+2];
+329:       u3zip1 += bope * shu[2][qi][tj][ti+1];
+330:       u3zim1 += bope * shu[2][qi][tj][ti-1];
+331:       u3zim2 += bope * shu[2][qi][tj][ti-2];
+332:     }
+333:     lau3zx = i12 * (-shl[tk][tj][ti+2] * u3zip2 + 8 *
+334: 		    shl[tk][tj][ti+1] * u3zip1 -8 *
+335: 		    shl[tk][tj][ti-1] * u3zim1 +
+336: 		    shl[tk][tj][ti-2] * u3zim2);
+337:     r1 += strx_i * lau3zx;
+338:
+339:     mu3xz = 0;
+340:     for (int q=0; q<8; q++) {
+341:       int qi = (low) ? q : (7-q);
+342:       mu3xz += dev_bope[q*6+k] * (shm[qi][tj][ti] * i12 *
+343: 				      (-shu[2][qi][tj][ti+2] + 8 * shu[2][qi][tj][ti+1]
+344: 				       -8 * shu[2][qi][tj][ti-1] + shu[2][qi][tj][ti-2]));
+345:     }
+346:     r1 += strx_i * mu3xz;
+347:
+348:     r2 = r2 + strx_i * stry_j *
+349:       (i144 * (shm[tk][tj][ti-2] * (shu[0][tk][tj-2][ti-2]-shu[0][tk][tj+2][ti-2] + 8*
+350: 				      (-shu[0][tk][tj-1][ti-2]+shu[0][tk][tj+1][ti-2])) - 8*
+351: 	       (shm[tk][tj][ti-1] * (shu[0][tk][tj-2][ti-1]-shu[0][tk][tj+2][ti-1] + 8 *
+352: 				       (-shu[0][tk][tj-1][ti-1]+shu[0][tk][tj+1][ti-1])) ) + 8 *
+353: 	       (shm[tk][tj][ti+1] * (shu[0][tk][tj-2][ti+1]-shu[0][tk][tj+2][ti+1] + 8*
+354: 				       (-shu[0][tk][tj-1][ti+1]+shu[0][tk][tj+1][ti+1])) ) -
+355: 	       (shm[tk][tj][ti+2] * (shu[0][tk][tj-2][ti+2]-shu[0][tk][tj+2][ti+2] + 8 *
+356: 				       (-shu[0][tk][tj-1][ti+2]+shu[0][tk][tj+1][ti+2])) ))
+357:
+358:        + i144*( shl[tk][tj-2][ti] * (shu[0][tk][tj-2][ti-2] - shu[0][tk][tj-2][ti+2] + 8 *
+359: 					 (-shu[0][tk][tj-2][ti-1] + shu[0][tk][tj-2][ti+1])) - 8*
+360: 		(shl[tk][tj-1][ti] * (shu[0][tk][tj-1][ti-2] - shu[0][tk][tj-1][ti+2] + 8 *
+361: 					  (-shu[0][tk][tj-1][ti-1] + shu[0][tk][tj-1][ti+1])) ) + 8 *
+362: 		(shl[tk][tj+1][ti] * (shu[0][tk][tj+1][ti-2] - shu[0][tk][tj+1][ti+2] + 8 *
+363: 					  (-shu[0][tk][tj+1][ti-1] + shu[0][tk][tj+1][ti+1])) ) -
+364: 		(shl[tk][tj+2][ti] * (shu[0][tk][tj+2][ti-2] - shu[0][tk][tj+2][ti+2] + 8 *
+365: 					  (-shu[0][tk][tj+2][ti-1] + shu[0][tk][tj+2][ti+1])) )) );
+366:
+367:     u3zjp2 = 0;
+368:     u3zjp1 = 0;
+369:     u3zjm1 = 0;
+370:     u3zjm2 = 0;
+371:     for (int q=0; q<8; q++) {
+372:       int qi = (low) ? q : (7-q);
+373:       float_sw4 bope = dev_bope[q*6+k];
+374:       u3zjp2 += bope * shu[2][qi][tj+2][ti];
+375:       u3zjp1 += bope * shu[2][qi][tj+1][ti];
+376:       u3zjm1 += bope * shu[2][qi][tj-1][ti];
+377:       u3zjm2 += bope * shu[2][qi][tj-2][ti];
+378:     }
+379:     lau3zy= i12 * (-shl[tk][tj+2][ti] * u3zjp2 + 8 *
+380: 		   shl[tk][tj+1][ti] * u3zjp1 - 8 *
+381: 		   shl[tk][tj-1][ti] * u3zjm1 +
+382: 		   shl[tk][tj-2][ti] * u3zjm2);
+383:
+384:     r2 += stry_j * lau3zy;
+385:
+386:     mu3yz = 0;
+387:     for (int q=0; q<8; q++) {
+388:       int qi = (low) ? q : (7-q);
+389:       mu3yz += dev_bope[q*6+k] *
+390: 	(shm[qi][tj][ti] * i12 *
+391: 	 (-shu[2][qi][tj+2][ti] + 8 * shu[2][qi][tj+1][ti] - 8 *
+392: 	  shu[2][qi][tj-1][ti] + shu[2][qi][tj-2][ti]) );
+393:     }
+394:     r2 += stry_j * mu3yz;
+395:
+396:     u1zip2 = 0;
+397:     u1zip1 = 0;
+398:     u1zim1 = 0;
+399:     u1zim2 = 0;
+400:     for (int q=0; q<8; q++) {
+401:       int qi = (low) ? q : (7-q);
+402:       float_sw4 bope = dev_bope[q*6+k];
+403:       u1zip2 += bope * shu[0][qi][tj][ti+2];
+404:       u1zip1 += bope * shu[0][qi][tj][ti+1];
+405:       u1zim1 += bope * shu[0][qi][tj][ti-1];
+406:       u1zim2 += bope * shu[0][qi][tj][ti-2];
+407:     }
+408:     mu1zx= i12 * (-shm[tk][tj][ti+2] * u1zip2 + 8 *
+409: 		  shm[tk][tj][ti+1] * u1zip1 - 8 *
+410: 		  shm[tk][tj][ti-1] * u1zim1 +
+411: 		  shm[tk][tj][ti-2] * u1zim2);
+412:     r3 += strx_i * mu1zx;
+413:
+414:     u2zjp2 = 0;
+415:     u2zjp1 = 0;
+416:     u2zjm1 = 0;
+417:     u2zjm2 = 0;
+418:     for (int q=0; q<8; q++) {
+419:       int qi = (low) ? q : (7-q);
+420:       float_sw4 bope = dev_bope[q*6+k];
+421:       u2zjp2 += bope * shu[1][qi][tj+2][ti];
+422:       u2zjp1 += bope * shu[1][qi][tj+1][ti];
+423:       u2zjm1 += bope * shu[1][qi][tj-1][ti];
+424:       u2zjm2 += bope * shu[1][qi][tj-2][ti];
+425:     }
+426:     mu2zy= i12 * (-shm[tk][tj+2][ti] * u2zjp2 + 8 *
+427: 		  shm[tk][tj+1][ti] * u2zjp1 - 8 *
+428: 		  shm[tk][tj-1][ti] * u2zjm1 +
+429: 		  shm[tk][tj-2][ti] * u2zjm2);
+430:     r3 += stry_j * mu2zy;
+431:
+432:     lau1xz = 0;
+433:     for (int q=0; q<8; q++)
+434:     {
+435:       int qi = (low) ? q : (7-q);
+436:       lau1xz += dev_bope[q*6+k] *
+437: 	(shl[qi][tj][ti] * i12 *
+438: 	 (-shu[0][qi][tj][ti+2] + 8 * shu[0][qi][tj][ti+1] - 8 *
+439: 	  shu[0][qi][tj][ti-1] + shu[0][qi][tj][ti-2]) );
+440:     }
+441:     r3 += strx_i * lau1xz;
+442:
+443:     lau2yz = 0;
+444:     for (int q=0; q<8; q++)
+445:     {
+446:       int qi = (low) ? q : (7-q);
+447:       lau2yz += dev_bope[q*6+k] *
+448: 	(shl[qi][tj][ti] * i12 *
+449: 	 (-shu[1][qi][tj+2][ti] + 8 * shu[1][qi][tj+1][ti] - 8 *
+450: 	  shu[1][qi][tj-1][ti] + shu[1][qi][tj-2][ti]) );
+451:     }
+452:     r3 += stry_j * lau2yz;
+453:
+454:     index = (k + 2) * nij + j * ni + i;
+455:     if (pred) {
+456:
+457:       float_sw4 fact = dt*dt / a_rho[index];
+458:       up(0,index) = 2 * shu[0][tk][tj][ti] - um(0,index) + fact * (cof * r1 + fo(0,index));
+459:       up(1,index) = 2 * shu[1][tk][tj][ti] - um(1,index) + fact * (cof * r2 + fo(1,index));
+460:       up(2,index) = 2 * shu[2][tk][tj][ti] - um(2,index) + fact * (cof * r3 + fo(2,index));
+461:     }
+462:     else {
+463:
+464:       float_sw4 fact = dt*dt*dt*dt / (12 * a_rho[index]);
+465:       up(0,index) += fact * (cof * r1 + fo(0,index));
+466:       up(1,index) += fact * (cof * r2 + fo(1,index));
+467:       up(2,index) += fact * (cof * r3 + fo(2,index));
+468:     }
+469:   }
+470: }
+```cpp```
+# End Source Code
+# Begin Performance Analysis
+
+### ROOFLINE SUMMARY RHS4_KBOUNDARY (CONFIGURED):
+{
+  "void rhs4_Kboundary<1, 0, 1>(int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double, double)": [
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 3.9 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 2.77 active warps per scheduler, but only an average of 0.38 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, avoid possible load imbalances due to highly different execution durations per warp. Reducing stalls indicated on the Warp State Statistics and Source Counters sections can help, too."
+  ],
+  "void rhs4_Kboundary<1, 1, 1>(int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double, double)": [
+    "The 3.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the hardware maximum of 16. This kernel's theoretical occupancy (18.8%) is limited by the number of required registers."
+  ]
+}
+
+# End Performance Analysis
+
+
+# Begin H100 Optimization Guidance
+Optimize specifically for NVIDIA H100 (Hopper) by targeting L2/cache reuse, HBM3 bandwidth, and Tensor Core throughput. Prioritize tiling and data locality: make global accesses coalesced/contiguous, reuse data from registers/shared memory/L2, and reduce redundant global traffic. Use Hopper async pipelines to hide memory latency: stage global→shared with cp.async / cuda::memcpy_async using double/triple buffering so loads overlap compute; keep the pipeline full instead of blocking on loads. If compute is matrix/attention-like, map work to Tensor Cores (WMMA/CUTLASS/cuBLASLt) and use mixed precision (FP16/BF16/TF32, FP8 when numerically safe) to increase throughput. Tune launch configuration to avoid occupancy cliffs: pick block sizes that sustain high occupancy without excessive register pressure or shared-memory usage; avoid large per-thread local arrays that cause spills. Reduce warp inefficiency: minimize divergence, expensive atomics, and unnecessary __syncthreads(); prefer warp-level primitives and cooperative groups where applicable. If memory-bound, reduce passes and consider fusion/batching to increase L2 hit rate; if compute-bound, increase ILP, unroll judiciously, and favor FMA-friendly instruction patterns.
+# End H100 Optimization Guidance
+
+# Begin Entrypoint Guardrails
+Entrypoint guardrails:
+1. The source does not contain a main() definition. Do NOT introduce one.
+2. Do NOT add wrapper executables, test harnesses, helper mains, or alternate standalone programs.
+3. Keep the existing top-level program structure intact; only optimize within the existing file structure.
+4. Do NOT change externally referenced function names or break linkage between existing declarations and definitions.
+# End Entrypoint Guardrails
+# Instructions
+You must optimize the source code provided above using only the performance data provided above. 
+
+Optimize the following HPC code for execution time.
+Can you give me the fixed optimized code that will replace the full source code including headers and main function body?
+2. Do not add line numbers to the generated code. 
+3. Do not rename or duplicate any kernel or function.
+4. Do not change any function signatures.
+5. Preserve the existing entry-point structure exactly. If the file already has main(), keep exactly one equivalent main(); if it does not, do not add one.
+6. Do not add duplicate definitions for main or for any externally linked function.
+7. Do not turn declarations into disconnected definitions or break declaration/definition linkage.
+8. Keep all changes inside the existing kernel/function bodies whenever possible.
+9. Do NOT introduce any new helper functions, utility functions, macros, templates, classes, structs, global variables, or other new top-level symbols outside the existing kernels/functions.
+10. Do NOT add wrapper load helpers such as ro(), custom ldg wrappers, or any new reusable abstraction outside the existing kernel/function body.
+11. Do NOT increase the total shared-memory footprint of any kernel beyond the original source. Do not enlarge existing __shared__ arrays, do not add new shared-memory tiles, and prefer register/cache/read-only load optimizations over larger shared-memory staging.
+12. Use the performance analysis reference number(s) to guide your changes.
+13. Return:
+   (a) the full source code including the optimized kernels inside ``` block (starts with ``` and ends with ``` )
+   (b) optimizations list = [{'lines': [...], 'reason': '...'}]
+   (c) suggested_but_not_applied list = [{'lines': [...], 'reason': '...'}]
+14. Do not generate more than one copy of the same kernel.
+15. Do not invent any new kernels or placeholder code.
+
+ONLY respond with the updated code and two structured lists. No explanation, no notes, no markdown titles. Follow this format exactly.

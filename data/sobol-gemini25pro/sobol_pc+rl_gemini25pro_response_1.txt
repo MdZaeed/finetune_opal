@@ -1,0 +1,182 @@
+```cpp
+#include "sobol.h"
+#include "sobol_gpu.h"
+#include <chrono>
+#include <algorithm>
+
+#define k_2powneg32 2.3283064E-10F
+
+// Preconditions:
+// - n_vectors > 0: The number of Sobol sequence values to generate per dimension.
+// - n_dimensions > 0: The number of Sobol dimensions to generate. This parameter also defines the number of direction vectors (e.g., 32 for 32-bit Sobol).
+// - d_directions: Pointer to device memory containing the direction numbers.
+//                 It must be allocated for at least `n_dimensions_host * n_dimensions_kernel * sizeof(unsigned int)` bytes,
+//                 where `n_dimensions_host` is the number of Sobol dimensions to generate (passed to `sobolGPU`),
+//                 and `n_dimensions_kernel` is the number of direction vectors per Sobol dimension (passed as `n_dimensions` to the kernel).
+//                 The data for each Sobol dimension must be contiguous.
+// - d_output: Pointer to device memory for storing the generated Sobol sequence values.
+//             It must be allocated for at least `n_vectors * n_dimensions_host * sizeof(float)` bytes.
+// Postconditions:
+// - d_output will contain `n_vectors * n_dimensions_host` Sobol quasi-random numbers.
+// - For each Sobol dimension (indexed by `blockIdx.y`), `d_output[blockIdx.y * n_vectors + i]`
+//   will hold the i-th Sobol number for that dimension, scaled to `[0, 1)`.
+__global__
+void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+                     unsigned *__restrict__ d_directions,
+                     float *__restrict__ d_output)
+{
+    // `n_dimensions` in the kernel signature refers to the number of direction vectors for a single Sobol dimension (e.g., 32).
+    // `blockIdx.y` selects which of the `n_dimensions_host` Sobol dimensions this block is computing.
+    __shared__ unsigned int v[n_dimensions];
+
+    // Adjust pointers for the current Sobol dimension (blockIdx.y)
+    d_directions += n_dimensions * blockIdx.y;
+    d_output += n_vectors * blockIdx.y;
+
+    // Load direction numbers into shared memory
+    // Invariant: After this loop and __syncthreads(), v[k] == d_directions[k] for k < n_dimensions.
+    if (threadIdx.x < n_dimensions)
+    {
+        v[threadIdx.x] = d_directions[threadIdx.x];
+    }
+    __syncthreads();
+
+    // Calculate global index for this thread
+    int i0     = threadIdx.x + blockIdx.x * blockDim.x;
+    int stride = gridDim.x * blockDim.x;
+
+    // Hoist constant calculations for __ffs(stride)
+    // This helps reduce potential stalls related to repeated calculations or shared memory indexing.
+    // Performance Analysis: stall_short_sb_ratio on lines 243, 283.
+    unsigned int log2_stride = __ffs(stride); // Position of LSB + 1, so log2(stride) + 1
+    unsigned int log2_stride_minus_1 = log2_stride - 1; // This is log2(stride)
+
+    // Calculate initial Gray code for i0
+    unsigned int g = i0 ^ (i0 >> 1);
+
+    unsigned int X = 0;
+    unsigned int mask;
+
+    // First loop: Compute initial Sobol value for i0
+    // Invariant 1: X holds the XOR sum of v[j] for j < k where the j-th bit of the initial Gray code g_initial was 1.
+    // Invariant 2: g holds g_initial >> k.
+    // Proof of Invariance:
+    // - Initially, k=0, X=0, g = i0 ^ (i0 >> 1).
+    // - In each iteration k:
+    //   - mask = - (g & 1); correctly extracts the k-th bit of the current g (which is g_initial >> k).
+    //     If the bit is 1, mask is 0xFFFFFFFF; if 0, mask is 0x00000000.
+    //   - X ^= mask & v[k]; updates X by XORing v[k] if the k-th bit of g_initial (after shifting) was 1.
+    //     This maintains Invariant 1.
+    //   - g = g >> 1; shifts g to prepare for the next bit, maintaining Invariant 2.
+    for (unsigned int k = 0 ; k < log2_stride_minus_1 ; k++) // Use hoisted constant
+    {
+        mask = - (g & 1);
+        X ^= mask & v[k];
+        g = g >> 1;
+    }
+
+    // Store the first computed Sobol value
+    if (i0 < n_vectors)
+    {
+        d_output[i0] = (float)X * k_2powneg32;
+    }
+
+    // Pre-fetch constant shared memory values for the second loop
+    // Performance Analysis: stall_short_sb_ratio on line 283.
+    // v_log2stridem1 is v[__ffs(stride) - 2] which is v[log2_stride - 2]
+    unsigned int v_log2stridem1 = v[log2_stride - 2]; // Use hoisted constant
+    unsigned int v_stridemask = stride - 1;
+
+    // Second loop: Compute subsequent Sobol values using Gray code update
+    // Invariant 1: X holds the current Sobol sequence value for i - stride.
+    // Invariant 2: v_log2stridem1 holds v[log2(stride) - 2].
+    // Invariant 3: v_stridemask holds stride - 1.
+    // Proof of Invariance:
+    // - v_log2stridem1 and v_stridemask are initialized before the loop and not modified within it,
+    //   so Invariants 2 and 3 hold.
+    // - X is updated by X ^= v_log2stridem1 ^ v[__ffs(~((i - stride) | v_stridemask)) - 1];.
+    //   This is the standard Gray code update for Sobol sequences. The `__ffs(~((i - stride) | v_stridemask)) - 1`
+    //   term identifies the bit position `j` where `i-stride` and `i` differ, and `v[j]` is XORed.
+    //   This correctly computes the next Sobol value based on the previous one and the direction numbers,
+    //   thus maintaining Invariant 1.
+    for (unsigned int i = i0 + stride ; i < n_vectors ; i += stride)
+    {
+        X ^= v_log2stridem1 ^ v[__ffs(~((i - stride) | v_stridemask)) - 1];
+        d_output[i] = (float)X * k_2powneg32;
+    }
+}
+
+// Preconditions:
+// - repeat > 0: Number of times to repeat the kernel execution for timing.
+// - n_vectors > 0: Number of Sobol sequence values per dimension.
+// - n_dimensions > 0: Number of Sobol dimensions to generate.
+// - d_directions: Pointer to device memory containing direction numbers.
+// - d_output: Pointer to device memory for storing results.
+// Postconditions:
+// - Returns the total execution time of the kernel launches in nanoseconds.
+// - d_output contains the generated Sobol sequences after the last kernel launch.
+double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+                unsigned int *d_directions, float *d_output)
+{
+    const int threadsperblock = 64;
+
+    dim3 dimGrid;
+    dim3 dimBlock;
+
+    dimGrid.y = n_dimensions; // Each blockIdx.y processes one Sobol dimension
+
+    // Optimized dimGrid.x calculation:
+    // 1. Calculate the minimum number of blocks required to cover all n_vectors.
+    // 2. Round this number up to the next power of 2.
+    // This ensures full coverage and leverages the power-of-2 property for the Sobol algorithm's Gray code update.
+    // The original heuristic `if (n_dimensions < (4 * 24))` is removed as it could lead to suboptimal grid sizes.
+    // Performance Analysis: General GPU underutilization due to potentially suboptimal grid sizing.
+    unsigned int targetDimGridX = (n_vectors + threadsperblock - 1) / threadsperblock;
+    dimGrid.x = 1;
+    while (dimGrid.x < targetDimGridX) {
+        dimGrid.x *= 2;
+    }
+
+    dimBlock.x = threadsperblock;
+
+    cudaDeviceSynchronize();
+    auto start = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < repeat; i++)
+      sobolGPU_kernel <<<dimGrid, dimBlock>>> (
+        n_vectors, n_dimensions, d_directions, d_output);
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    return time;
+}
+```
+```
+optimizations = [
+  {
+    'lines': [77, 78, 83, 123],
+    'reason': 'Hoisted `__ffs(stride)` related calculations (`log2_stride`, `log2_stride_minus_1`) out of loops and repeated expressions. This reduces redundant computations and helps the compiler optimize shared memory indexing, addressing `stall_short_sb_ratio` and `stall_wait_ratio` by providing constant values earlier in the pipeline.'
+  },
+  {
+    'lines': [160, 161, 162, 163, 164, 165, 166, 167, 170, 171, 172, 173, 176, 177, 178, 179],
+    'reason': 'Simplified the `dimGrid.x` calculation in `sobolGPU` to always compute the required number of blocks to cover `n_vectors` and then round up to the next power of 2. This ensures optimal grid sizing for the workload, improving overall GPU utilization and potentially reducing `stall_wait_ratio` by keeping the GPU busy, without relying on arbitrary heuristics that could lead to under-launching blocks.'
+  }
+]
+```
+```
+suggested_but_not_applied = [
+  {
+    'lines': [83, 89, 90, 91, 92],
+    'reason': 'Considered unrolling the first `for` loop (`for (unsigned int k = 0 ; k < log2_stride_minus_1 ; k++)`) to reduce loop overhead and potentially expose more instruction-level parallelism. However, `log2_stride_minus_1` can be up to 20-30 for large `n_vectors`, making full unrolling impractical due to increased code size and register pressure. Partial unrolling was not applied to avoid over-complicating the code without clear performance benefits given the small number of iterations in many common cases.'
+  },
+  {
+    'lines': [47],
+    'reason': 'The shared memory declaration `__shared__ unsigned int v[n_dimensions];` relies on `n_dimensions` (the kernel parameter) being the number of direction vectors per Sobol dimension (e.g., 32). If `n_dimensions` (from the host) can be large, this static shared memory allocation would fail or be incorrect. A more robust solution would be to pass the actual number of direction vectors (e.g., 32) as a separate kernel argument or use dynamic shared memory. This was not applied to maintain the existing function signature and avoid introducing new kernel parameters or dynamic shared memory complexities without explicit information on the range of `n_dimensions`.'
+  },
+  {
+    'lines': [95, 135],
+    'reason': 'The performance analysis noted "0 fused and 31250000 non-fused FP32 instructions" and suggested converting non-fused instructions to fused equivalents. The floating-point operation `(float)X * k_2powneg32` is a single multiply. Without an accompanying add operation, it cannot be directly fused into an FMA (Fused Multiply-Add). No changes were applied as there is no obvious way to introduce an FMA without altering the core Sobol algorithm.'
+  }
+]
+```

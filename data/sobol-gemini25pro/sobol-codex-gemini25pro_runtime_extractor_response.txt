@@ -1,0 +1,135 @@
+```bash
+#!/bin/bash
+
+LOG_FILE="$1"
+
+# Check for exactly one argument
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 <log_file_path>" >&2
+    exit 1
+fi
+
+# Check if file exists
+if [ ! -f "$LOG_FILE" ]; then
+    echo "Error: Log file not found: $LOG_FILE" >&2
+    exit 1
+fi
+
+# Use awk to parse and convert runtime values.
+# It prioritizes "total", "end-to-end", "overall", "average" runtimes.
+# If multiple high-priority runtimes are found, the last one is chosen.
+# If no high-priority runtimes are found, it falls back to "runtime", "elapsed", "execution" runtimes,
+# again choosing the last one found.
+runtime_awk_script='
+BEGIN {
+    # Variables to store the last found high-priority and generic runtimes
+    final_high_priority_runtime_ms = "";
+    final_generic_runtime_ms = "";
+}
+
+# Function to convert a value and its unit to milliseconds
+function convert_to_ms(value, unit) {
+    if (unit == "ms" || unit == "milliseconds") {
+        return value;
+    } else if (unit == "s" || unit == "seconds") {
+        return value * 1000;
+    } else if (unit == "us" || unit == "microseconds") {
+        return value / 1000;
+    }
+    return ""; # Return empty if unit is not recognized
+}
+
+# High-priority pattern 1: "Total Time:", "Average Time:", "End-to-end Time:", "Overall Time:"
+# This pattern looks for keywords followed by "Time:" (optional colon) and then the number and unit.
+/((Total|End-to-end|Overall|Average|Avg) [Tt]ime:?) ([0-9]*\.?[0-9]+) ?(ms|s|us|milliseconds|seconds|microseconds)/ {
+    # Extract the number and unit part from the matched line
+    match($0, /([0-9]*\.?[0-9]+) ?(ms|s|us|milliseconds|seconds|microseconds)/);
+    if (RSTART > 0) {
+        value_unit_str = substr($0, RSTART, RLENGTH);
+        
+        # Extract the numeric value
+        match(value_unit_str, /([0-9]*\.?[0-9]+)/);
+        num = substr(value_unit_str, RSTART, RLENGTH);
+        
+        # Extract the unit string
+        match(value_unit_str, /(ms|s|us|milliseconds|seconds|microseconds)/);
+        unit_str = substr(value_unit_str, RSTART, RLENGTH);
+
+        current_ms = convert_to_ms(num, unit_str);
+        if (current_ms != "") {
+            final_high_priority_runtime_ms = current_ms;
+        }
+    }
+    next; # Move to the next line after processing
+}
+
+# High-priority pattern 2: "Program finished in X unit"
+# This pattern is distinct as it doesn't use "Time:"
+/[Pp]rogram finished in ([0-9]*\.?[0-9]+) ?(ms|s|us|milliseconds|seconds|microseconds)/ {
+    # Extract the number and unit part
+    match($0, /([0-9]*\.?[0-9]+) ?(ms|s|us|milliseconds|seconds|microseconds)/);
+    if (RSTART > 0) {
+        value_unit_str = substr($0, RSTART, RLENGTH);
+        
+        # Extract the numeric value
+        match(value_unit_str, /([0-9]*\.?[0-9]+)/);
+        num = substr(value_unit_str, RSTART, RLENGTH);
+        
+        # Extract the unit string
+        match(value_unit_str, /(ms|s|us|milliseconds|seconds|microseconds)/);
+        unit_str = substr(value_unit_str, RSTART, RLENGTH);
+
+        current_ms = convert_to_ms(num, unit_str);
+        if (current_ms != "") {
+            final_high_priority_runtime_ms = current_ms;
+        }
+    }
+    next; # Move to the next line after processing
+}
+
+# Generic pattern: "Runtime:", "Elapsed time:", "Execution time:"
+# This pattern looks for general runtime indicators.
+/([Rr]untime|[Ee]lapsed|[Ee]xecution) [Tt]ime:? ([0-9]*\.?[0-9]+) ?(ms|s|us|milliseconds|seconds|microseconds)/ {
+    # Extract the number and unit part
+    match($0, /([0-9]*\.?[0-9]+) ?(ms|s|us|milliseconds|seconds|microseconds)/);
+    if (RSTART > 0) {
+        value_unit_str = substr($0, RSTART, RLENGTH);
+        
+        # Extract the numeric value
+        match(value_unit_str, /([0-9]*\.?[0-9]+)/);
+        num = substr(value_unit_str, RSTART, RLENGTH);
+        
+        # Extract the unit string
+        match(value_unit_str, /(ms|s|us|milliseconds|seconds|microseconds)/);
+        unit_str = substr(value_unit_str, RSTART, RLENGTH);
+
+        current_ms = convert_to_ms(num, unit_str);
+        if (current_ms != "") {
+            final_generic_runtime_ms = current_ms;
+        }
+    }
+    next; # Move to the next line after processing
+}
+
+END {
+    # Prioritize high-priority runtimes over generic ones
+    if (final_high_priority_runtime_ms != "") {
+        printf "runtime_ms=%.3f\n", final_high_priority_runtime_ms;
+    } else if (final_generic_runtime_ms != "") {
+        printf "runtime_ms=%.3f\n", final_generic_runtime_ms;
+    }
+    # If neither is found, awk will produce no output, and the bash script will handle the error.
+}
+'
+
+# Execute awk and capture its output
+runtime_output=$(awk "$runtime_awk_script" "$LOG_FILE")
+
+# Check if awk produced any output (i.e., a runtime was found)
+if [ -n "$runtime_output" ]; then
+    echo "$runtime_output"
+else
+    echo "Error: No runtime found in $LOG_FILE" >&2
+    exit 1
+fi
+```

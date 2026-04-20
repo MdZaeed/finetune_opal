@@ -1,0 +1,270 @@
+```
+__global__ void addsgd4_SM (int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+                         int ni, int nj, int nk,
+                         float_sw4* __restrict__ a_up,
+                         const float_sw4* __restrict__ a_u,
+                         const float_sw4* __restrict__ a_um,
+                         const float_sw4* __restrict__ a_rho,
+                         const float_sw4* __restrict__ a_dcx,
+                         const float_sw4* __restrict__ a_dcy,
+                         const float_sw4* __restrict__ a_dcz,
+                         const float_sw4* __restrict__ a_strx,
+                         const float_sw4* __restrict__ a_stry,
+                         const float_sw4* __restrict__ a_strz,
+                         const float_sw4* __restrict__ a_cox,
+                         const float_sw4* __restrict__ a_coy,
+                         const float_sw4* __restrict__ a_coz,
+                         const float_sw4 beta) {
+  int index_load;
+  float_sw4 u_km2[3], u_km1[3], old_up[3];
+
+  __shared__ float_sw4 shu[3][3][BY+4][BX+4];
+
+  const int i = threadIdx.x + blockIdx.x * BX;
+  const int j = jfirst + threadIdx.y + blockIdx.y * BY;
+
+  const int ti = threadIdx.x + 2;
+  const int tj = threadIdx.y + 2;
+
+  const int nij = ni * nj;
+  const int nijk = nij * nk;
+
+  int active=0, loader=0, loady2=0, loaderx2=0;
+
+  if (i+2 >= ifirst && i+2 <= ilast && j <= jlast)
+    active = 1;
+
+  if (i < ni && j-2 <= jlast+2) {
+    loader = 1;
+    if (threadIdx.x < 4 && i+BX < ni)
+      loaderx2 = 1;
+    if (threadIdx.y < 4 && j-2+BY <= jlast+2)
+      loady2 = 1;
+  }
+
+  if (active) {
+    int idx0 = (kfirst - 2) * nij + j * ni + i + 2;
+    #pragma unroll
+    for (int c=0; c<3; c++)
+      u_km2[c] = u(c,idx0) - um(c,idx0);
+    idx0 += nij;
+    #pragma unroll
+    for (int c=0; c<3; c++)
+      u_km1[c] = u(c,idx0) - um(c,idx0);
+  }
+
+  index_load = kfirst * nij + (j - 2) * ni + i;
+
+  #pragma unroll
+  for (int c=0; c<3; c++) {
+    if (loader) {
+      int idx = index_load;
+      shu[c][1][threadIdx.y][threadIdx.x] = u(c,idx) - um(c,idx);
+      shu[c][2][threadIdx.y][threadIdx.x] = u(c,idx+nij) - um(c,idx+nij);
+    }
+    if (loaderx2) {
+      int idx = index_load + BX;
+      shu[c][1][threadIdx.y][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+      shu[c][2][threadIdx.y][threadIdx.x+BX] = u(c,idx+nij) - um(c,idx+nij);
+    }
+    if (loady2) {
+      int idx = index_load + BY * ni;
+      shu[c][1][threadIdx.y+BY][threadIdx.x] = u(c,idx) - um(c,idx);
+      shu[c][2][threadIdx.y+BY][threadIdx.x] = u(c,idx+nij) - um(c,idx+nij);
+    }
+    if (loady2 && loaderx2) {
+      int idx = index_load + BY * ni + BX;
+      shu[c][1][threadIdx.y+BY][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+      shu[c][2][threadIdx.y+BY][threadIdx.x+BX] = u(c,idx+nij) - um(c,idx+nij);
+    }
+  }
+
+  index_load += 2 * nij;
+
+  // Precompute indices and coefficients that are invariant across k
+  int jni = j * ni;
+
+  float_sw4 dcx_ip1=0, dcx_ip2=0, dcx_ip3=0;
+  float_sw4 dcy_jm1=0, dcy_j=0, dcy_jp1=0;
+  float_sw4 strx_i2=0, stry_j=0, cox_i2=0, coy_j=0;
+  if (active) {
+#if __CUDA_ARCH__ >= 350
+    dcx_ip1 = __ldg(&a_dcx[i+1]);
+    dcx_ip2 = __ldg(&a_dcx[i+2]);
+    dcx_ip3 = __ldg(&a_dcx[i+3]);
+    dcy_jm1 = __ldg(&a_dcy[j-1]);
+    dcy_j   = __ldg(&a_dcy[j]);
+    dcy_jp1 = __ldg(&a_dcy[j+1]);
+    strx_i2 = __ldg(&a_strx[i+2]);
+    stry_j  = __ldg(&a_stry[j]);
+    cox_i2  = __ldg(&a_cox[i+2]);
+    coy_j   = __ldg(&a_coy[j]);
+#else
+    dcx_ip1 = a_dcx[i+1];
+    dcx_ip2 = a_dcx[i+2];
+    dcx_ip3 = a_dcx[i+3];
+    dcy_jm1 = a_dcy[j-1];
+    dcy_j   = a_dcy[j];
+    dcy_jp1 = a_dcy[j+1];
+    strx_i2 = a_strx[i+2];
+    stry_j  = a_stry[j];
+    cox_i2  = a_cox[i+2];
+    coy_j   = a_coy[j];
+#endif
+  }
+
+  // Rolling k-dependent coefficients
+  float_sw4 dcz_km1=0, dcz_k=0, dcz_kp1=0;
+  if (active) {
+#if __CUDA_ARCH__ >= 350
+    dcz_km1 = __ldg(&a_dcz[kfirst-1]);
+    dcz_k   = __ldg(&a_dcz[kfirst]);
+    dcz_kp1 = __ldg(&a_dcz[kfirst+1]);
+#else
+    dcz_km1 = a_dcz[kfirst-1];
+    dcz_k   = a_dcz[kfirst];
+    dcz_kp1 = a_dcz[kfirst+1];
+#endif
+  }
+
+  // Rolling index for the active update
+  int idx_active = 0;
+  if (active) {
+    idx_active = kfirst * nij + jni + i + 2;
+  }
+
+  for (int k=kfirst; k <= klast; k++) {
+    __syncthreads();
+
+    #pragma unroll
+    for (int c=0; c<3; c++) {
+      if (loader) {
+        // shift planes s=0<-1, s=1<-2
+        shu[c][0][threadIdx.y][threadIdx.x] = shu[c][1][threadIdx.y][threadIdx.x];
+        shu[c][1][threadIdx.y][threadIdx.x] = shu[c][2][threadIdx.y][threadIdx.x];
+        int idx = index_load;
+        shu[c][2][threadIdx.y][threadIdx.x] = u(c,idx) - um(c,idx);
+      }
+      if (loaderx2) {
+        shu[c][0][threadIdx.y][threadIdx.x+BX] = shu[c][1][threadIdx.y][threadIdx.x+BX];
+        shu[c][1][threadIdx.y][threadIdx.x+BX] = shu[c][2][threadIdx.y][threadIdx.x+BX];
+        int idx = index_load + BX;
+        shu[c][2][threadIdx.y][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+      }
+      if (loady2) {
+        shu[c][0][threadIdx.y+BY][threadIdx.x] = shu[c][1][threadIdx.y+BY][threadIdx.x];
+        shu[c][1][threadIdx.y+BY][threadIdx.x] = shu[c][2][threadIdx.y+BY][threadIdx.x];
+        int idx = index_load + BY * ni;
+        shu[c][2][threadIdx.y+BY][threadIdx.x] = u(c,idx) - um(c,idx);
+      }
+      if (loady2 && loaderx2) {
+        shu[c][0][threadIdx.y+BY][threadIdx.x+BX] = shu[c][1][threadIdx.y+BY][threadIdx.x+BX];
+        shu[c][1][threadIdx.y+BY][threadIdx.x+BX] = shu[c][2][threadIdx.y+BY][threadIdx.x+BX];
+        int idx = index_load + BY * ni + BX;
+        shu[c][2][threadIdx.y+BY][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+      }
+    }
+
+    index_load += nij;
+    __syncthreads();
+
+    if (active) {
+      // Per-k coefficients reused across components
+#if __CUDA_ARCH__ >= 350
+      const float_sw4 coz_k = __ldg(&a_coz[k]);
+      const float_sw4 strz_k = __ldg(&a_strz[k]);
+#else
+      const float_sw4 coz_k = a_coz[k];
+      const float_sw4 strz_k = a_strz[k];
+#endif
+      const float_sw4 scale_x = strx_i2 * coy_j * coz_k;
+      const float_sw4 scale_y = stry_j  * cox_i2 * coz_k;
+      const float_sw4 scale_z = strz_k  * cox_i2 * coy_j;
+
+#if __CUDA_ARCH__ >= 350
+      const float_sw4 rho_c = __ldg(&a_rho[idx_active]);
+#else
+      const float_sw4 rho_c = a_rho[idx_active];
+#endif
+      const float_sw4 birho = beta / rho_c;
+
+      #pragma unroll
+      for (int c=0; c<3; c++) {
+        // Cache shared values into registers
+        const float_sw4 vx_p2 = shu[c][0][tj][ti+2];
+        const float_sw4 vx_p1 = shu[c][0][tj][ti+1];
+        const float_sw4 vx_c  = shu[c][0][tj][ti  ];
+        const float_sw4 vx_m1 = shu[c][0][tj][ti-1];
+        const float_sw4 vx_m2 = shu[c][0][tj][ti-2];
+
+        const float_sw4 vy_p2 = shu[c][0][tj+2][ti];
+        const float_sw4 vy_p1 = shu[c][0][tj+1][ti];
+        const float_sw4 vy_c  = shu[c][0][tj  ][ti];
+        const float_sw4 vy_m1 = shu[c][0][tj-1][ti];
+        const float_sw4 vy_m2 = shu[c][0][tj-2][ti];
+
+        const float_sw4 vz_p  = shu[c][2][tj][ti];
+        const float_sw4 vz_c  = shu[c][1][tj][ti];
+        const float_sw4 vz_m  = shu[c][0][tj][ti];
+
+        // Neighbor rhos
+#if __CUDA_ARCH__ >= 350
+        const float_sw4 rho_xp = __ldg(&a_rho[idx_active+1]);
+        const float_sw4 rho_xm = __ldg(&a_rho[idx_active-1]);
+
+        const float_sw4 rho_yp = __ldg(&a_rho[idx_active+ni]);
+        const float_sw4 rho_ym = __ldg(&a_rho[idx_active-ni]);
+
+        const float_sw4 rho_zp = __ldg(&a_rho[idx_active+nij]);
+        const float_sw4 rho_zm = __ldg(&a_rho[idx_active-nij]);
+#else
+        const float_sw4 rho_xp = a_rho[idx_active+1];
+        const float_sw4 rho_xm = a_rho[idx_active-1];
+
+        const float_sw4 rho_yp = a_rho[idx_active+ni];
+        const float_sw4 rho_ym = a_rho[idx_active-ni];
+
+        const float_sw4 rho_zp = a_rho[idx_active+nij];
+        const float_sw4 rho_zm = a_rho[idx_active-nij];
+#endif
+
+        // Second derivatives in x and y
+        const float_sw4 d2x = rho_xp * dcx_ip3 * (vx_p2 - 2.0f * vx_p1 + vx_c)
+                            - 2.0f * rho_c * dcx_ip2 * (vx_p1 - 2.0f * vx_c + vx_m1)
+                            + rho_xm * dcx_ip1 * (vx_c - 2.0f * vx_m1 + vx_m2);
+
+        const float_sw4 d2y = rho_yp * dcy_jp1 * (vy_p2 - 2.0f * vy_p1 + vy_c)
+                            - 2.0f * rho_c * dcy_j  * (vy_p1 - 2.0f * vy_c + vy_m1)
+                            + rho_ym * dcy_jm1 * (vy_c - 2.0f * vy_m1 + vy_m2);
+
+        // Second derivative in z
+        const float_sw4 d2z = rho_zp * dcz_kp1 * (vz_p - 2.0f * vz_c + vz_m)
+                            - 2.0f * rho_c * dcz_k   * (vz_c - 2.0f * vz_m + u_km1[c])
+                            + rho_zm * dcz_km1 * (vz_m - 2.0f * u_km1[c] + u_km2[c]);
+
+        up(c,idx_active) -= birho * ( scale_x * d2x + scale_y * d2y + scale_z * d2z );
+
+        // roll z-history
+        u_km2[c] = u_km1[c];
+        u_km1[c] = vz_m;
+      }
+    }
+
+    if (active) {
+      // roll k-dependent coefficients for next iteration
+      dcz_km1 = dcz_k;
+      dcz_k   = dcz_kp1;
+      if (k+2 <= klast+1) {
+#if __CUDA_ARCH__ >= 350
+        dcz_kp1 = __ldg(&a_dcz[k+2]);
+#else
+        dcz_kp1 = a_dcz[k+2];
+#endif
+      }
+      idx_active += nij;
+    }
+  }
+}
+```
+optimizations list = [{'lines': [20, 38, 46, 54, 59, 63, 70, 74, 83, 97, 104, 112, 121, 124, 129, 137, 152, 156, 157, 160, 168, 175, 183, 186, 190, 197, 201, 205], 'reason': 'Increased ILP and reduced instruction overhead: unrolled small loops, cached shared-memory stencil values into registers, and hoisted invariant coefficients and indices out of the k-loop.'}, {'lines': [108, 109, 110, 111, 117, 118, 119, 120, 135, 136, 145, 146, 147], 'reason': 'Used __ldg() for read-only coefficient and rho accesses to improve L2/cache hit rate on H100 and reduce HBM bandwidth pressure.'}, {'lines': [139, 140, 141, 142, 143, 144], 'reason': 'Precomputed per-iteration scaling factors (scale_x, scale_y, scale_z) to reduce redundant multiplications across vector components.'}, {'lines': [25, 26, 27, 28, 29, 30, 31, 32], 'reason': 'Preserved loader flags and shared-memory tiling but reduced loop/control overhead with #pragma unroll and direct two-step plane shifts to minimize synchronization work per iteration.'}, {'lines': [150, 171, 210, 214], 'reason': 'Replaced per-iteration recomputation of flat indices with rolling idx_active and rolling dcz coefficients to cut integer arithmetic and memory traffic inside the loop.'}] 
+suggested_but_not_applied = [{'lines': [1], 'reason': 'Introduce cp.async (cuda::memcpy_async) double-buffered global-to-shared staging pipeline to overlap memory transfers with compute on H100; requires broader code restructuring and additional cooperative-group headers not present in this file.'}, {'lines': [20], 'reason': 'Re-layout shared memory tile to avoid potential bank conflicts (e.g., pad BX+4 to BX+5); would require coordinated changes across call sites/macros to ensure correct halo indexing.'}, {'lines': [1], 'reason': 'Tune BX/BY and launch configuration to increase occupancy based on register and shared-memory usage on target; not changed because tile sizes/macros are externally defined.'}]

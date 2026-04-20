@@ -1,0 +1,547 @@
+```
+__global__ void rhs4_X (int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+			  int ni, int nj, int nk,
+			  float_sw4* __restrict__ a_up,
+			  const float_sw4* __restrict__ a_u,
+			  const float_sw4* __restrict__ a_um,
+			  const float_sw4* __restrict__ a_mu,
+			  const float_sw4* __restrict__ a_lambda,
+			  const float_sw4* __restrict__ a_rho,
+			  const float_sw4* __restrict__ a_fo,
+			  const float_sw4* __restrict__ a_strx,
+			  const float_sw4* __restrict__ a_stry,
+			  const float_sw4* __restrict__ a_strz,
+			  const float_sw4 h,
+			  const float_sw4 dt) {
+  int index, i;
+
+  const float_sw4 i6   = 1.0/6;
+  const float_sw4 i144 = 1.0/144;
+  const float_sw4 tf   = 0.75;
+
+  float_sw4 strx_im2, strx_im1, strx_i, strx_ip1, strx_ip2;
+  float_sw4 stry_jm2, stry_jm1, stry_j, stry_jp1, stry_jp2;
+  float_sw4 strz_km2, strz_km1, strz_k, strz_kp1, strz_kp2;
+
+  float_sw4 la_km2, la_km1, la_ijk, la_kp1, la_kp2;
+  float_sw4 la_im2, la_im1, la_ip1, la_ip2;
+  float_sw4 la_jm2, la_jm1, la_jp1, la_jp2;
+
+  float_sw4 mu_km2, mu_km1, mu_ijk, mu_kp1, mu_kp2;
+  float_sw4 mu_im2, mu_im1, mu_ip1, mu_ip2;
+  float_sw4 mu_jm2, mu_jm1, mu_jp1, mu_jp2;
+
+  float_sw4 r1, r2, r3;
+  int active=0, loadj1=0, loadj2=0, loadk1=0, loadk2=0, loadk3=0, loadk4=0;
+
+  __shared__ float_sw4 shm[3][12+4][16+4][2+4];
+
+  float_sw4 cof = 1.0 / (h * h);
+  const float_sw4 dt2 = dt * dt;
+  const float_sw4 dt4_12 = (dt2 * dt2) * (1.0/12);
+
+  const int j = jfirst + threadIdx.y + blockIdx.y * 16;
+  const int k = kfirst + threadIdx.z + blockIdx.z * 12;
+
+  const int ti = threadIdx.x + 2;
+  const int tj = threadIdx.y + 2;
+  const int tk = threadIdx.z + 2;
+
+  int tid = (threadIdx.z * 16 + threadIdx.y) * 2 + threadIdx.x;
+  int txload = (tid % 6);
+  int tyload = (tid / 6);
+  int tzload = tyload / 16;
+  tyload = tyload % 16;
+
+  const int nij = ni * nj;
+  const int nijk = nij * nk;
+  const int nij4 = 4 * nij;
+
+  if (j <= jlast && k <= klast)
+    active = 1;
+
+  if (active) {
+
+#if __CUDA_ARCH__ >= 350
+    stry_jm2 = __ldg(&a_stry[j-2]);
+    stry_jm1 = __ldg(&a_stry[j-1]);
+    stry_j   = __ldg(&a_stry[j]);
+    stry_jp1 = __ldg(&a_stry[j+1]);
+    stry_jp2 = __ldg(&a_stry[j+2]);
+
+    strz_km2 = __ldg(&a_strz[k-2]);
+    strz_km1 = __ldg(&a_strz[k-1]);
+    strz_k   = __ldg(&a_strz[k]);
+    strz_kp1 = __ldg(&a_strz[k+1]);
+    strz_kp2 = __ldg(&a_strz[k+2]);
+#else
+    stry_jm2 = a_stry[j-2];
+    stry_jm1 = a_stry[j-1];
+    stry_j   = a_stry[j];
+    stry_jp1 = a_stry[j+1];
+    stry_jp2 = a_stry[j+2];
+
+    strz_km2 = a_strz[k-2];
+    strz_km1 = a_strz[k-1];
+    strz_k   = a_strz[k];
+    strz_kp1 = a_strz[k+1];
+    strz_kp2 = a_strz[k+2];
+#endif
+  }
+
+  int jload, kload;
+  jload = blockIdx.y * 16 + tyload + jfirst - 2;
+  kload = blockIdx.z * 12 + tzload + kfirst - 2;
+
+  if (jload <= jlast+2) loadj1 = 1;
+  if (tyload < 4 && jload+16 <= jlast+2) loadj2 = 1;
+  if (kload <= klast+2) loadk1 = 1;
+  if (kload+4 <= klast+2) loadk2 = 1;
+  if (kload+8 <= klast+2) loadk3 = 1;
+  if (kload+12 <= klast+2) loadk4 = 1;
+
+#pragma unroll
+  for (int iside=0; iside < 2; iside++) {
+
+    if (iside == 0) {
+
+      index = (kload * nj + jload) * ni + ifirst - 2 + txload;
+      i = ifirst + threadIdx.x;
+    }
+    else {
+
+      index = (kload * nj + jload) * ni + ilast - 3 + txload;
+      i = ilast - 1 + threadIdx.x;
+    }
+
+    if (loadj1) {
+      int idx = index;
+      if (loadk1) {
+#if __CUDA_ARCH__ >= 350
+	shm[0][tzload][tyload][txload] = __ldg(&a_lambda[idx]);
+	shm[1][tzload][tyload][txload] = __ldg(&a_mu[idx]);
+#else
+	shm[0][tzload][tyload][txload] = a_lambda[idx];
+	shm[1][tzload][tyload][txload] = a_mu[idx];
+#endif
+      }
+      idx += nij4;
+      if (loadk2) {
+#if __CUDA_ARCH__ >= 350
+	shm[0][tzload+4][tyload][txload] = __ldg(&a_lambda[idx]);
+	shm[1][tzload+4][tyload][txload] = __ldg(&a_mu[idx]);
+#else
+	shm[0][tzload+4][tyload][txload] = a_lambda[idx];
+	shm[1][tzload+4][tyload][txload] = a_mu[idx];
+#endif
+      }
+      idx += nij4;
+      if (loadk3) {
+#if __CUDA_ARCH__ >= 350
+	shm[0][tzload+8][tyload][txload] = __ldg(&a_lambda[idx]);
+	shm[1][tzload+8][tyload][txload] = __ldg(&a_mu[idx]);
+#else
+	shm[0][tzload+8][tyload][txload] = a_lambda[idx];
+	shm[1][tzload+8][tyload][txload] = a_mu[idx];
+#endif
+      }
+      idx += nij4;
+      if (loadk4) {
+#if __CUDA_ARCH__ >= 350
+	shm[0][tzload+12][tyload][txload] = __ldg(&a_lambda[idx]);
+	shm[1][tzload+12][tyload][txload] = __ldg(&a_mu[idx]);
+#else
+	shm[0][tzload+12][tyload][txload] = a_lambda[idx];
+	shm[1][tzload+12][tyload][txload] = a_mu[idx];
+#endif
+      }
+    }
+    if (loadj2) {
+      int idx = index + 16 * ni;
+      if (loadk1) {
+#if __CUDA_ARCH__ >= 350
+	shm[0][tzload][tyload+16][txload] = __ldg(&a_lambda[idx]);
+	shm[1][tzload][tyload+16][txload] = __ldg(&a_mu[idx]);
+#else
+	shm[0][tzload][tyload+16][txload] = a_lambda[idx];
+	shm[1][tzload][tyload+16][txload] = a_mu[idx];
+#endif
+      }
+      idx += nij4;
+      if (loadk2) {
+#if __CUDA_ARCH__ >= 350
+	shm[0][tzload+4][tyload+16][txload] = __ldg(&a_lambda[idx]);
+	shm[1][tzload+4][tyload+16][txload] = __ldg(&a_mu[idx]);
+#else
+	shm[0][tzload+4][tyload+16][txload] = a_lambda[idx];
+	shm[1][tzload+4][tyload+16][txload] = a_mu[idx];
+#endif
+      }
+      idx += nij4;
+      if (loadk3) {
+#if __CUDA_ARCH__ >= 350
+	shm[0][tzload+8][tyload+16][txload] = __ldg(&a_lambda[idx]);
+	shm[1][tzload+8][tyload+16][txload] = __ldg(&a_mu[idx]);
+#else
+	shm[0][tzload+8][tyload+16][txload] = a_lambda[idx];
+	shm[1][tzload+8][tyload+16][txload] = a_mu[idx];
+#endif
+      }
+      idx += nij4;
+      if (loadk4) {
+#if __CUDA_ARCH__ >= 350
+	shm[0][tzload+12][tyload+16][txload] = __ldg(&a_lambda[idx]);
+	shm[1][tzload+12][tyload+16][txload] = __ldg(&a_mu[idx]);
+#else
+	shm[0][tzload+12][tyload+16][txload] = a_lambda[idx];
+	shm[1][tzload+12][tyload+16][txload] = a_mu[idx];
+#endif
+      }
+    }
+    __syncthreads();
+
+    la_km2 = shm[0][tk-2][tj][ti];
+    la_km1 = shm[0][tk-1][tj][ti];
+    la_ijk = shm[0][tk  ][tj][ti];
+    la_kp1 = shm[0][tk+1][tj][ti];
+    la_kp2 = shm[0][tk+2][tj][ti];
+
+    la_jm2 = shm[0][tk][tj-2][ti];
+    la_jm1 = shm[0][tk][tj-1][ti];
+    la_jp1 = shm[0][tk][tj+1][ti];
+    la_jp2 = shm[0][tk][tj+2][ti];
+
+    la_im2 = shm[0][tk][tj][ti-2];
+    la_im1 = shm[0][tk][tj][ti-1];
+    la_ip1 = shm[0][tk][tj][ti+1];
+    la_ip2 = shm[0][tk][tj][ti+2];
+
+    mu_km2 = shm[1][tk-2][tj][ti];
+    mu_km1 = shm[1][tk-1][tj][ti];
+    mu_ijk = shm[1][tk  ][tj][ti];
+    mu_kp1 = shm[1][tk+1][tj][ti];
+    mu_kp2 = shm[1][tk+2][tj][ti];
+
+    mu_jm2 = shm[1][tk][tj-2][ti];
+    mu_jm1 = shm[1][tk][tj-1][ti];
+    mu_jp1 = shm[1][tk][tj+1][ti];
+    mu_jp2 = shm[1][tk][tj+2][ti];
+
+    mu_im2 = shm[1][tk][tj][ti-2];
+    mu_im1 = shm[1][tk][tj][ti-1];
+    mu_ip1 = shm[1][tk][tj][ti+1];
+    mu_ip2 = shm[1][tk][tj][ti+2];
+    __syncthreads();
+
+    if (loadj1) {
+      int idx = index;
+      if (loadk1) {
+	shm[0][tzload][tyload][txload] = u(0,idx);
+	shm[1][tzload][tyload][txload] = u(1,idx);
+	shm[2][tzload][tyload][txload] = u(2,idx);
+      }
+      idx += nij4;
+      if (loadk2) {
+	shm[0][tzload+4][tyload][txload] = u(0,idx);
+	shm[1][tzload+4][tyload][txload] = u(1,idx);
+	shm[2][tzload+4][tyload][txload] = u(2,idx);
+      }
+      idx += nij4;
+      if (loadk3) {
+	shm[0][tzload+8][tyload][txload] = u(0,idx);
+	shm[1][tzload+8][tyload][txload] = u(1,idx);
+	shm[2][tzload+8][tyload][txload] = u(2,idx);
+      }
+      idx += nij4;
+      if (loadk4) {
+	shm[0][tzload+12][tyload][txload] = u(0,idx);
+	shm[1][tzload+12][tyload][txload] = u(1,idx);
+	shm[2][tzload+12][tyload][txload] = u(2,idx);
+      }
+    }
+    if (loadj2) {
+      int idx = index + 16 * ni;
+      if (loadk1) {
+	shm[0][tzload][tyload+16][txload] = u(0,idx);
+	shm[1][tzload][tyload+16][txload] = u(1,idx);
+	shm[2][tzload][tyload+16][txload] = u(2,idx);
+      }
+      idx += nij4;
+      if (loadk2) {
+	shm[0][tzload+4][tyload+16][txload] = u(0,idx);
+	shm[1][tzload+4][tyload+16][txload] = u(1,idx);
+	shm[2][tzload+4][tyload+16][txload] = u(2,idx);
+      }
+      idx += nij4;
+      if (loadk3) {
+	shm[0][tzload+8][tyload+16][txload] = u(0,idx);
+	shm[1][tzload+8][tyload+16][txload] = u(1,idx);
+	shm[2][tzload+8][tyload+16][txload] = u(2,idx);
+      }
+      idx += nij4;
+      if (loadk4) {
+	shm[0][tzload+12][tyload+16][txload] = u(0,idx);
+	shm[1][tzload+12][tyload+16][txload] = u(1,idx);
+	shm[2][tzload+12][tyload+16][txload] = u(2,idx);
+      }
+    }
+    __syncthreads();
+
+    if (active) {
+
+#if __CUDA_ARCH__ >= 350
+      strx_im2 = __ldg(&a_strx[i-2]);
+      strx_im1 = __ldg(&a_strx[i-1]);
+      strx_i   = __ldg(&a_strx[i]);
+      strx_ip1 = __ldg(&a_strx[i+1]);
+      strx_ip2 = __ldg(&a_strx[i+2]);
+#else
+      strx_im2 = a_strx[i-2];
+      strx_im1 = a_strx[i-1];
+      strx_i   = a_strx[i];
+      strx_ip1 = a_strx[i+1];
+      strx_ip2 = a_strx[i+2];
+#endif
+
+      const float_sw4 u0 = shm[0][tk][tj][ti];
+      const float_sw4 v0 = shm[1][tk][tj][ti];
+      const float_sw4 w0 = shm[2][tk][tj][ti];
+
+      {
+	float_sw4 mux1, mux2, mux3, mux4;
+	mux1 = mu_im1 * strx_im1 - tf * (mu_ijk * strx_i + mu_im2 * strx_im2);
+	mux2 = mu_im2 * strx_im2 + mu_ip1 * strx_ip1 + 3 * (mu_ijk * strx_i   + mu_im1 * strx_im1);
+	mux3 = mu_im1 * strx_im1 + mu_ip2 * strx_ip2 + 3 * (mu_ip1 * strx_ip1 + mu_ijk * strx_i  );
+	mux4 = mu_ip1 * strx_ip1 - tf * (mu_ijk * strx_i + mu_ip2 * strx_ip2);
+
+	r1 = strx_i * ((2 * mux1 + la_im1 * strx_im1 - tf * (la_ijk * strx_i   + la_im2 * strx_im2)) *
+		       (shm[0][tk+0][tj+0][ti-2] - u0)+
+		       (2 * mux2 + la_im2 * strx_im2 + la_ip1 * strx_ip1 +
+			3 * (la_ijk * strx_i   + la_im1 * strx_im1)) *
+		       (shm[0][tk+0][tj+0][ti-1] - u0) +
+		       (2 * mux3 + la_im1 * strx_im1 + la_ip2 * strx_ip2 +
+			3 * (la_ip1 * strx_ip1 + la_ijk * strx_i  )) *
+		       (shm[0][tk+0][tj+0][ti+1] - u0) +
+		       (2 * mux4 + la_ip1 * strx_ip1 - tf * (la_ijk * strx_i   + la_ip2 * strx_ip2)) *
+		       (shm[0][tk+0][tj+0][ti+2] - u0));
+	r2 = strx_i * (mux1 * (shm[1][tk+0][tj+0][ti-2] - v0) +
+		       mux2 * (shm[1][tk+0][tj+0][ti-1] - v0) +
+		       mux3 * (shm[1][tk+0][tj+0][ti+1] - v0) +
+		       mux4 * (shm[1][tk+0][tj+0][ti+2] - v0));
+	r3 = strx_i * (mux1 * (shm[2][tk+0][tj+0][ti-2] - w0) +
+		       mux2 * (shm[2][tk+0][tj+0][ti-1] - w0) +
+		       mux3 * (shm[2][tk+0][tj+0][ti+1] - w0) +
+		       mux4 * (shm[2][tk+0][tj+0][ti+2] - w0));
+      }
+
+      {
+	float_sw4 muy1, muy2, muy3, muy4;
+	muy1 = mu_jm1 * stry_jm1 - tf * (mu_ijk * stry_j + mu_jm2 * stry_jm2);
+	muy2 = mu_jm2 * stry_jm2 + mu_jp1 * stry_jp1 + 3 * (mu_ijk * stry_j   + mu_jm1 * stry_jm1);
+	muy3 = mu_jm1 * stry_jm1 + mu_jp2 * stry_jp2 + 3 * (mu_jp1 * stry_jp1 + mu_ijk * stry_j  );
+	muy4 = mu_jp1 * stry_jp1 - tf * (mu_ijk * stry_j + mu_jp2 * stry_jp2);
+
+	r1 += stry_j * (muy1 * (shm[0][tk+0][tj-2][ti+0] - u0) +
+			muy2 * (shm[0][tk+0][tj-1][ti+0] - u0) +
+			muy3 * (shm[0][tk+0][tj+1][ti+0] - u0) +
+			muy4 * (shm[0][tk+0][tj+2][ti+0] - u0));
+	r2 += stry_j * ((2 * muy1 + la_jm1 * stry_jm1 - tf * (la_ijk * stry_j + la_jm2 * stry_jm2)) *
+			(shm[1][tk+0][tj-2][ti+0] - v0) +
+			(2 * muy2 + la_jm2 * stry_jm2 + la_jp1 * stry_jp1 +
+			 3 * (la_ijk * stry_j   + la_jm1 * stry_jm1)) *
+			(shm[1][tk+0][tj-1][ti+0] - v0) +
+			(2 * muy3 + la_jm1 * stry_jm1 + la_jp2 * stry_jp2 +
+			 3 * (la_jp1 * stry_jp1 + la_ijk * stry_j  )) *
+			(shm[1][tk+0][tj+1][ti+0] - v0) +
+			(2 * muy4 + la_jp1 * stry_jp1 - tf * (la_ijk * stry_j  + la_jp2 * stry_jp2)) *
+			(shm[1][tk+0][tj+2][ti+0] - v0));
+	r3 += stry_j  *(muy1 * (shm[2][tk+0][tj-2][ti+0] - w0) +
+			muy2 * (shm[2][tk+0][tj-1][ti+0] - w0) +
+			muy3 * (shm[2][tk+0][tj+1][ti+0] - w0) +
+			muy4 * (shm[2][tk+0][tj+2][ti+0] - w0));
+      }
+
+      {
+	float_sw4 muz1, muz2, muz3, muz4;
+	muz1 = mu_km1 * strz_km1 - tf * (mu_ijk * strz_k + mu_km2 * strz_km2);
+	muz2 = mu_km2 * strz_km2 + mu_kp1 * strz_kp1 + 3 * (mu_ijk * strz_k   + mu_km1 * strz_km1);
+	muz3 = mu_km1 * strz_km1 + mu_kp2 * strz_kp2 + 3 * (mu_kp1 * strz_kp1 + mu_ijk * strz_k);
+	muz4 = mu_kp1 * strz_kp1 - tf * (mu_ijk * strz_k + mu_kp2 * strz_kp2);
+	r1 += strz_k * (muz1 * (shm[0][tk-2][tj+0][ti+0] - u0) +
+			muz2 * (shm[0][tk-1][tj+0][ti+0] - u0) +
+			muz3 * (shm[0][tk+1][tj+0][ti+0] - u0) +
+			muz4 * (shm[0][tk+2][tj+0][ti+0] - u0));
+	r2 += strz_k * (muz1 * (shm[1][tk-2][tj+0][ti+0] - v0) +
+			muz2 * (shm[1][tk-1][tj+0][ti+0] - v0) +
+			muz3 * (shm[1][tk+1][tj+0][ti+0] - v0) +
+			muz4 * (shm[1][tk+2][tj+0][ti+0] - v0));
+	r3 += strz_k * ((2 * muz1 + la_km1 * strz_km1 - tf * (la_ijk * strz_k + la_km2 * strz_km2)) *
+			(shm[2][tk-2][tj+0][ti+0] - w0) +
+			(2 * muz2 + la_km2 * strz_km2 + la_kp1 * strz_kp1 +
+			 3 * (la_ijk * strz_k   + la_km1 * strz_km1)) *
+			(shm[2][tk-1][tj+0][ti+0] - w0) +
+			(2 * muz3 + la_km1 * strz_km1 + la_kp2 * strz_kp2 +
+			 3 * (la_kp1 * strz_kp1 + la_ijk * strz_k  )) *
+			(shm[2][tk+1][tj+0][ti+0] - w0) +
+			(2 * muz4 + la_kp1 * strz_kp1 - tf * (la_ijk * strz_k + la_kp2 * strz_kp2)) *
+			(shm[2][tk+2][tj+0][ti+0] - w0));
+      }
+      r1 *= i6;
+      r2 *= i6;
+      r3 *= i6;
+
+      r1 += strx_i  * stry_j * i144 *
+	(la_im2 * (shm[1][tk+0][tj-2][ti-2] - shm[1][tk+0][tj+2][ti-2] + 8 *
+		   (-shm[1][tk+0][tj-1][ti-2] + shm[1][tk+0][tj+1][ti-2])) - 8 *
+	 (la_im1 * (shm[1][tk+0][tj-2][ti-1] - shm[1][tk+0][tj+2][ti-1] + 8 *
+		   (-shm[1][tk+0][tj-1][ti-1] + shm[1][tk+0][tj+1][ti-1]))) + 8 *
+	 (la_ip1 * (shm[1][tk+0][tj-2][ti+1] - shm[1][tk+0][tj+2][ti+1] + 8 *
+		   (-shm[1][tk+0][tj-1][ti+1] + shm[1][tk+0][tj+1][ti+1]))) -
+	 (la_ip2 * (shm[1][tk+0][tj-2][ti+2] - shm[1][tk+0][tj+2][ti+2] + 8 *
+		   (-shm[1][tk+0][tj-1][ti+2] + shm[1][tk+0][tj+1][ti+2]))))
+
+        + strx_i * strz_k * i144 *
+	(la_im2 * (shm[2][tk-2][tj+0][ti-2] - shm[2][tk+2][tj+0][ti-2] + 8 *
+		   (-shm[2][tk-1][tj+0][ti-2] + shm[2][tk+1][tj+0][ti-2])) - 8 *
+	 (la_im1 * (shm[2][tk-2][tj+0][ti-1] - shm[2][tk+2][tj+0][ti-1] + 8 *
+		   (-shm[2][tk-1][tj+0][ti-1] + shm[2][tk+1][tj+0][ti-1]))) + 8 *
+	 (la_ip1 * (shm[2][tk-2][tj+0][ti+1] - shm[2][tk+2][tj+0][ti+1] + 8 *
+		   (-shm[2][tk-1][tj+0][ti+1] + shm[2][tk+1][tj+0][ti+1]))) -
+	 (la_ip2 * (shm[2][tk-2][tj+0][ti+2] - shm[2][tk+2][tj+0][ti+2] + 8 *
+		   (-shm[2][tk-1][tj+0][ti+2] + shm[2][tk+1][tj+0][ti+2]))))
+
+        + strx_i * stry_j * i144 *
+	(mu_jm2 * (shm[1][tk+0][tj-2][ti-2] - shm[1][tk+0][tj-2][ti+2] + 8 *
+		   (-shm[1][tk+0][tj-2][ti-1] + shm[1][tk+0][tj-2][ti+1])) - 8 *
+	 (mu_jm1 * (shm[1][tk+0][tj-1][ti-2] - shm[1][tk+0][tj-1][ti+2] + 8 *
+		   (-shm[1][tk+0][tj-1][ti-1] + shm[1][tk+0][tj-1][ti+1]))) + 8 *
+	 (mu_jp1 * (shm[1][tk+0][tj+1][ti-2] - shm[1][tk+0][tj+1][ti+2] + 8 *
+		   (-shm[1][tk+0][tj+1][ti-1] + shm[1][tk+0][tj+1][ti+1]))) -
+	 (mu_jp2 * (shm[1][tk+0][tj+2][ti-2] - shm[1][tk+0][tj+2][ti+2] + 8 *
+		   (-shm[1][tk+0][tj+2][ti-1] + shm[1][tk+0][tj+2][ti+1]))))
+
+        + strx_i * strz_k * i144 *
+	(mu_km2 * (shm[2][tk-2][tj+0][ti-2] - shm[2][tk-2][tj+0][ti+2] + 8 *
+		   (-shm[2][tk-2][tj+0][ti-1] + shm[2][tk-2][tj+0][ti+1])) - 8 *
+  	 (mu_km1 * (shm[2][tk-1][tj+0][ti-2] - shm[2][tk-1][tj+0][ti+2] + 8 *
+		   (-shm[2][tk-1][tj+0][ti-1] + shm[2][tk-1][tj+0][ti+1]))) + 8 *
+  	 (mu_kp1 * (shm[2][tk+1][tj+0][ti-2] - shm[2][tk+1][tj+0][ti+2] + 8 *
+		   (-shm[2][tk+1][tj+0][ti-1] + shm[2][tk+1][tj+0][ti+1]))) -
+	 (mu_kp2 * (shm[2][tk+2][tj+0][ti-2] - shm[2][tk+2][tj+0][ti+2] + 8 *
+		   (-shm[2][tk+2][tj+0][ti-1] + shm[2][tk+2][tj+0][ti+1]))));
+
+      r2 += strx_i  *stry_j  *i144*
+	(mu_im2 * (shm[0][tk+0][tj-2][ti-2] - shm[0][tk+0][tj+2][ti-2] + 8 *
+		   (-shm[0][tk+0][tj-1][ti-2] + shm[0][tk+0][tj+1][ti-2])) - 8 *
+	 (mu_im1 * (shm[0][tk+0][tj-2][ti-1] - shm[0][tk+0][tj+2][ti-1] + 8 *
+		   (-shm[0][tk+0][tj-1][ti-1] + shm[0][tk+0][tj+1][ti-1]))) + 8 *
+	 (mu_ip1 * (shm[0][tk+0][tj-2][ti+1] - shm[0][tk+0][tj+2][ti+1] + 8 *
+		   (-shm[0][tk+0][tj-1][ti+1] + shm[0][tk+0][tj+1][ti+1]))) -
+	 (mu_ip2 * (shm[0][tk+0][tj-2][ti+2] - shm[0][tk+0][tj+2][ti+2] + 8 *
+		   (-shm[0][tk+0][tj-1][ti+2] + shm[0][tk+0][tj+1][ti+2]))))
+
+        + strx_i * stry_j * i144 *
+	(la_jm2 * (shm[0][tk+0][tj-2][ti-2] - shm[0][tk+0][tj-2][ti+2] + 8 *
+		   (-shm[0][tk+0][tj-2][ti-1] + shm[0][tk+0][tj-2][ti+1])) - 8 *
+	 (la_jm1 * (shm[0][tk+0][tj-1][ti-2] - shm[0][tk+0][tj-1][ti+2] + 8 *
+		   (-shm[0][tk+0][tj-1][ti-1] + shm[0][tk+0][tj-1][ti+1]))) + 8 *
+	 (la_jp1 * (shm[0][tk+0][tj+1][ti-2] - shm[0][tk+0][tj+1][ti+2] + 8 *
+		   (-shm[0][tk+0][tj+1][ti-1] + shm[0][tk+0][tj+1][ti+1]))) -
+	 (la_jp2 * (shm[0][tk+0][tj+2][ti-2] - shm[0][tk+0][tj+2][ti+2] + 8 *
+		   (-shm[0][tk+0][tj+2][ti-1] + shm[0][tk+0][tj+2][ti+1]))))
+
+        + stry_j * strz_k * i144 *
+	(la_jm2 * (shm[2][tk-2][tj-2][ti+0] - shm[2][tk+2][tj-2][ti+0] + 8 *
+		   (-shm[2][tk-1][tj-2][ti+0] + shm[2][tk+1][tj-2][ti+0])) - 8 *
+	 (la_jm1 * (shm[2][tk-2][tj-1][ti+0] - shm[2][tk+2][tj-1][ti+0] + 8 *
+		   (-shm[2][tk-1][tj-1][ti+0] + shm[2][tk+1][tj-1][ti+0]))) + 8 *
+	 (la_jp1 * (shm[2][tk-2][tj+1][ti+0] - shm[2][tk+2][tj+1][ti+0] + 8 *
+		   (-shm[2][tk-1][tj+1][ti+0] + shm[2][tk+1][tj+1][ti+0]))) -
+	 (la_jp2 * (shm[2][tk-2][tj+2][ti+0] - shm[2][tk+2][tj+2][ti+0] + 8 *
+		   (-shm[2][tk-1][tj+2][ti+0] + shm[2][tk+1][tj+2][ti+0]))))
+
+        + stry_j * strz_k * i144 *
+	(mu_km2 * (shm[2][tk-2][tj-2][ti+0] - shm[2][tk-2][tj+2][ti+0] + 8 *
+		   (-shm[2][tk-2][tj-1][ti+0] + shm[2][tk-2][tj+1][ti+0])) - 8 *
+	 (mu_km1 * (shm[2][tk-1][tj-2][ti+0] - shm[2][tk-1][tj+2][ti+0] + 8 *
+		   (-shm[2][tk-1][tj-1][ti+0] + shm[2][tk-1][tj+1][ti+0]))) + 8 *
+	 (mu_kp1 * (shm[2][tk+1][tj-2][ti+0] - shm[2][tk+1][tj+2][ti+0] + 8 *
+		   (-shm[2][tk+1][tj-1][ti+0] + shm[2][tk+1][tj+1][ti+0]))) -
+	 (mu_kp2 * (shm[2][tk+2][tj-2][ti+0] - shm[2][tk+2][tj+2][ti+0] + 8 *
+		   (-shm[2][tk+2][tj-1][ti+0] + shm[2][tk+2][tj+1][ti+0]))));
+
+      r3 += strx_i * strz_k * i144 *
+	(mu_im2 * (shm[0][tk-2][tj+0][ti-2] - shm[0][tk+2][tj+0][ti-2] + 8 *
+		   (-shm[0][tk-1][tj+0][ti-2] + shm[0][tk+1][tj+0][ti-2])) - 8 *
+	 (mu_im1 * (shm[0][tk-2][tj+0][ti-1] - shm[0][tk+2][tj+0][ti-1] + 8 *
+		   (-shm[0][tk-1][tj+0][ti-1] + shm[0][tk+1][tj+0][ti-1]))) + 8 *
+	 (mu_ip1 * (shm[0][tk-2][tj+0][ti+1] - shm[0][tk+2][tj+0][ti+1] + 8 *
+		   (-shm[0][tk-1][tj+0][ti+1] + shm[0][tk+1][tj+0][ti+1]))) -
+	 (mu_ip2 * (shm[0][tk-2][tj+0][ti+2] - shm[0][tk+2][tj+0][ti+2] + 8 *
+		   (-shm[0][tk-1][tj+0][ti+2] + shm[0][tk+1][tj+0][ti+2]))))
+
+        + stry_j  *strz_k*i144*
+	(mu_jm2 * (shm[1][tk-2][tj-2][ti+0] - shm[1][tk+2][tj-2][ti+0] + 8 *
+		   (- shm[1][tk-1][tj-2][ti+0]+shm[1][tk+1][tj-2][ti+0])) - 8 *
+	 (mu_jm1 * (shm[1][tk-2][tj-1][ti+0] - shm[1][tk+2][tj-1][ti+0] + 8 *
+		   (- shm[1][tk-1][tj-1][ti+0]+shm[1][tk+1][tj-1][ti+0]))) + 8 *
+	 (mu_jp1 * (shm[1][tk-2][tj+1][ti+0] - shm[1][tk+2][tj+1][ti+0] + 8 *
+		   (- shm[1][tk-1][tj+1][ti+0]+shm[1][tk+1][tj+1][ti+0]))) -
+	 (mu_jp2 * (shm[1][tk-2][tj+2][ti+0] - shm[1][tk+2][tj+2][ti+0] + 8 *
+		   (- shm[1][tk-1][tj+2][ti+0]+shm[1][tk+1][tj+2][ti+0]))))
+
+        + strx_i  *strz_k*i144*
+	(la_km2*(shm[0][tk-2][tj+0][ti-2] - shm[0][tk-2][tj+0][ti+2] + 8 *
+		   (- shm[0][tk-2][tj+0][ti-1]+shm[0][tk-2][tj+0][ti+1])) - 8*
+	 (la_km1*(shm[0][tk-1][tj+0][ti-2] - shm[0][tk-1][tj+0][ti+2] + 8 *
+		   (- shm[0][tk-1][tj+0][ti-1]+shm[0][tk-1][tj+0][ti+1]))) + 8*
+	 (la_kp1*(shm[0][tk+1][tj+0][ti-2] - shm[0][tk+1][tj+0][ti+2] + 8 *
+		   (- shm[0][tk+1][tj+0][ti-1]+shm[0][tk+1][tj+0][ti+1]))) -
+	 (la_kp2*(shm[0][tk+2][tj+0][ti-2] - shm[0][tk+2][tj+0][ti+2] + 8 *
+		   (- shm[0][tk+2][tj+0][ti-1]+shm[0][tk+2][tj+0][ti+1]))))
+
+        + stry_j  *strz_k*i144*
+	(la_km2*(shm[1][tk-2][tj-2][ti+0] - shm[1][tk-2][tj+2][ti+0] + 8 *
+		   (- shm[1][tk-2][tj-1][ti+0]+shm[1][tk-2][tj+1][ti+0])) - 8*
+	 (la_km1*(shm[1][tk-1][tj-2][ti+0] - shm[1][tk-1][tj+2][ti+0] + 8 *
+		   (- shm[1][tk-1][tj-1][ti+0]+shm[1][tk-1][tj+1][ti+0]))) + 8*
+	 (la_kp1*(shm[1][tk+1][tj-2][ti+0] - shm[1][tk+1][tj+2][ti+0] + 8 *
+		   (- shm[1][tk+1][tj-1][ti+0]+shm[1][tk+1][tj+1][ti+0]))) -
+	 (la_kp2*(shm[1][tk+2][tj-2][ti+0] - shm[1][tk+2][tj+2][ti+0] + 8 *
+		   (- shm[1][tk+2][tj-1][ti+0]+shm[1][tk+2][tj+1][ti+0]))));
+
+      if (pred) {
+
+	int idx = k * nij + j * ni + i;
+#if __CUDA_ARCH__ >= 350
+	float_sw4 fact = dt2 / __ldg(&a_rho[idx]);
+#else
+	float_sw4 fact = dt2 / a_rho[idx];
+#endif
+	up(0,idx) = 2 * u0 - um(0,idx) + fact * (cof * r1 + fo(0,idx));
+	up(1,idx) = 2 * v0 - um(1,idx) + fact * (cof * r2 + fo(1,idx));
+	up(2,idx) = 2 * w0 - um(2,idx) + fact * (cof * r3 + fo(2,idx));
+      }
+      else {
+
+	int idx = k * nij + j * ni + i;
+#if __CUDA_ARCH__ >= 350
+	float_sw4 fact = dt4_12 / __ldg(&a_rho[idx]);
+#else
+	float_sw4 fact = dt4_12 / a_rho[idx];
+#endif
+	up(0,idx) += fact * (cof * r1 + fo(0,idx));
+	up(1,idx) += fact * (cof * r2 + fo(1,idx));
+	up(2,idx) += fact * (cof * r3 + fo(2,idx));
+      }
+
+    }
+
+    if (iside == 0)
+      __syncthreads();
+
+  }
+}
+```
+optimizations list = [{'lines': [61, 62, 63, 64, 65, 67, 68, 69, 70, 71], 'reason': 'Use read-only cache (__ldg) for stry/strz loads to reduce memory latency and pressure on L1/SMEM on Hopper.'}, {'lines': [138, 144, 150, 156, 122, 128, 134, 140], 'reason': 'Use __ldg for a_lambda/a_mu global-to-shared staging to improve L2 hit rate and reduce latency.'}, {'lines': [178, 205, 230], 'reason': 'Kept synchronization minimal and scoped to necessary phases; no additional barriers added; ensured reuse of register-cached coefficients.'}, {'lines': [318, 319, 320], 'reason': 'Hoisted dt^2 and dt^4/12 precomputations to registers to reduce repeated FLOPs and enable better instruction scheduling.'}, {'lines': [336, 337, 338], 'reason': 'Use __ldg for a_strx loads to improve cache utilization.'}, {'lines': [341, 343, 345], 'reason': 'Cached center values u0, v0, w0 in registers to avoid repeated shared-memory reads across multiple stencil terms and stores.'}, {'lines': [247, 255, 257, 261, 268, 275, 279, 285, 289, 295, 301, 305, 309, 315], 'reason': 'Replaced repeated shared-memory center accesses with u0/v0/w0 registers, reducing shared-memory traffic and bank pressure.'}, {'lines': [443, 454], 'reason': 'Use __ldg for a_rho in final factor computation to leverage read-only cache.'}, {'lines': [112, 120], 'reason': 'Introduced nij4 = 4*nij to reduce integer multiply instructions in index increment loops.'}] 
+suggested_but_not_applied list = [{'lines': [99, 142, 178, 229], 'reason': 'Use cp.async (cuda::memcpy_async) with double-buffering for global-to-shared staging to overlap loads with compute on H100. Not applied due to constraints to keep changes minimal and avoid adding new pipeline helpers.'}, {'lines': [1], 'reason': 'Add __launch_bounds__ to cap registers per thread and increase occupancy on H100. Not applied to avoid changing function signature/attributes as per instructions.'}, {'lines': [178, 205], 'reason': 'Vectorize/coalesce i-dimension loads by remapping txload across warp for better coalescing. Not applied to avoid altering thread-data mapping semantics.'}, {'lines': [241, 268, 295], 'reason': 'Further cache neighbor stencil values (±1/±2 in i/j/k for all components) to reduce shared memory reads. Not applied because it risks increasing register pressure and reducing occupancy on H100.'}, {'lines': [443, 454], 'reason': 'Fuse RHS and update with next stage to increase arithmetic intensity and L2 locality. Not applied due to scope and linkage constraints.'}]

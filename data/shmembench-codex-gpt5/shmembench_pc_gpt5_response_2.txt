@@ -1,0 +1,131 @@
+```cpp
+#include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include <chrono>
+
+using namespace std::chrono;
+
+#define TOTAL_ITERATIONS (1024)
+#define BLOCK_SIZE 256
+
+__device__ __forceinline__ void shmem_swap(float4* __restrict__ v1, float4* __restrict__ v2) {
+  float4 tmp = *v2;
+  *v2 = *v1;
+  *v1 = tmp;
+}
+
+__device__ __forceinline__ float4 init_val(int i) {
+  return make_float4(i, i + 11, i + 19, i + 23);
+}
+
+__device__ __forceinline__ float4 reduce_vector(float4 v1, float4 v2, float4 v3, float4 v4, float4 v5, float4 v6) {
+  return make_float4(v1.x + v2.x + v3.x + v4.x + v5.x + v6.x,
+                     v1.y + v2.y + v3.y + v4.y + v5.y + v6.y,
+                     v1.z + v2.z + v3.z + v4.z + v5.z + v6.z,
+                     v1.w + v2.w + v3.w + v4.w + v5.w + v6.w);
+}
+
+__global__ __launch_bounds__(BLOCK_SIZE)
+void benchmark_shmem(float4* __restrict__ g_data) {
+  int tid = threadIdx.x;
+  int globaltid = blockIdx.x * blockDim.x + tid;
+
+  // Initialize six per-thread registers (no shared memory traffic)
+  float4 v0 = init_val(tid);
+  float4 v1 = init_val(tid + 1);
+  float4 v2 = init_val(tid + 3);
+  float4 v3 = init_val(tid + 7);
+  float4 v4 = init_val(tid + 13);
+  float4 v5 = init_val(tid + 17);
+
+  #pragma unroll 32
+  for (int j = 0; j < TOTAL_ITERATIONS; j++) {
+    // Phase 1 swaps
+    shmem_swap(&v0, &v1);
+    shmem_swap(&v2, &v3);
+    shmem_swap(&v4, &v5);
+
+    // Phase 2 swaps
+    shmem_swap(&v1, &v2);
+    shmem_swap(&v3, &v4);
+  }
+
+  g_data[globaltid] = reduce_vector(v0, v1, v2, v3, v4, v5);
+}
+
+void shmembenchGPU(double* c, const long size, const int repeat) {
+  // Enforce original grid configuration assumption
+  if ((size % (4 * BLOCK_SIZE)) != 0) {
+    fprintf(stderr, "Error: size must be a multiple of 4*BLOCK_SIZE (%d)\n", 4 * BLOCK_SIZE);
+    std::exit(1);
+  }
+
+  const int TOTAL_BLOCKS = size / (BLOCK_SIZE);
+
+  double* cd = nullptr;
+  cudaError_t err = cudaMalloc((void**)&cd, size * sizeof(double));
+  if (err != cudaSuccess) {
+    fprintf(stderr, "cudaMalloc failed: %s\n", cudaGetErrorString(err));
+    std::exit(1);
+  }
+
+  dim3 dimBlock(BLOCK_SIZE, 1, 1);
+  dim3 dimGrid_f4(TOTAL_BLOCKS / 4, 1, 1);
+
+  auto start = high_resolution_clock::now();
+
+  for (int i = 0; i < repeat; i++) {
+    benchmark_shmem<<<dimGrid_f4, dimBlock>>>((float4*)cd);
+  }
+
+  err = cudaDeviceSynchronize();
+  if (err != cudaSuccess) {
+    fprintf(stderr, "Kernel execution failed: %s\n", cudaGetErrorString(err));
+    cudaFree(cd);
+    std::exit(1);
+  }
+
+  auto end = high_resolution_clock::now();
+  auto time_shmem_128b = duration_cast<nanoseconds>(end - start).count() / (double)repeat;
+  printf("Average kernel execution time : %f (ms)\n", time_shmem_128b * 1e-6);
+
+  err = cudaMemcpy(c, cd, size * sizeof(double), cudaMemcpyDeviceToHost);
+  if (err != cudaSuccess) {
+    fprintf(stderr, "cudaMemcpy (D2H) failed: %s\n", cudaGetErrorString(err));
+    cudaFree(cd);
+    std::exit(1);
+  }
+  cudaFree(cd);
+
+  double sum = 0.0;
+  for (long i = 0; i < size; i++) sum += c[i];
+  if (sum != 21256458760384741137729978368.00)
+    printf("checksum failed\n");
+
+  printf("Memory throughput\n");
+  const long long operations_bytes  = (6LL + 4 * 5 * TOTAL_ITERATIONS + 6) * size * sizeof(float);
+  const long long operations_128bit = (6LL + 4 * 5 * TOTAL_ITERATIONS + 6) * size / 4;
+
+  printf("\tusing 128bit operations : %8.2f GB/sec (%6.2f billion accesses/sec)\n",
+         (double)operations_bytes / time_shmem_128b,
+         (double)operations_128bit / time_shmem_128b);
+}
+
+int main(int argc, char** argv) {
+  // Default configuration: ensure size is a multiple of 4*BLOCK_SIZE
+  const long size = (argc > 1) ? std::atol(argv[1]) : (long)BLOCK_SIZE * 4096 * 4;
+  const int repeat = (argc > 2) ? std::atoi(argv[2]) : 100;
+
+  double* h_c = (double*)std::malloc(size * sizeof(double));
+  if (!h_c) {
+    std::fprintf(stderr, "Host allocation failed\n");
+    return 1;
+  }
+
+  shmembenchGPU(h_c, size, repeat);
+
+  std::free(h_c);
+  return 0;
+}
+```

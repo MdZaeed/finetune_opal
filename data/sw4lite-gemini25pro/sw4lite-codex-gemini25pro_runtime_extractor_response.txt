@@ -1,0 +1,35 @@
+```bash
+#!/bin/bash
+
+# Check for exactly one argument
+if [ "$#" -ne 1 ]; then
+    echo "Error: Usage: $0 <log_file_path>" >&2
+    exit 1
+fi
+
+LOG_FILE="$1"
+
+# Check if the log file exists
+if [ ! -f "$LOG_FILE" ]; then
+    echo "Error: Log file '$LOG_FILE' not found." >&2
+    exit 1
+fi
+
+# Extract the last occurrence of "Total running time:"
+# We use grep to find lines containing the pattern,
+# tail -n 1 to get the very last match (preferring final end-to-end runtime),
+# and awk to extract the numerical value (which is the 4th field).
+RUNTIME_SEC=$(grep "Total running time:" "$LOG_FILE" | tail -n 1 | awk '{print $4}')
+
+# Check if a runtime value was successfully extracted
+if [ -z "$RUNTIME_SEC" ]; then
+    echo "Error: No 'Total running time' found in '$LOG_FILE'." >&2
+    exit 1
+fi
+
+# Convert the runtime from seconds to milliseconds using 'bc' for floating-point arithmetic
+RUNTIME_MS=$(echo "$RUNTIME_SEC * 1000" | bc)
+
+# Print the result in the specified format
+echo "runtime_ms=$RUNTIME_MS"
+```

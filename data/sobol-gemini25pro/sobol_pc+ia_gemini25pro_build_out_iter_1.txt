@@ -1,0 +1,2 @@
+cat run.sh >run 
+chmod a+x run

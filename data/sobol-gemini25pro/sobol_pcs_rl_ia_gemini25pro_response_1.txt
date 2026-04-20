@@ -1,0 +1,140 @@
+```cpp
+#include "sobol.h"
+#include "sobol_gpu.h"
+
+#define k_2powneg32 2.3283064E-10F
+
+__global__
+void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+                     unsigned int *__restrict__ d_directions,
+                     float *__restrict__ d_output)
+{
+    d_directions += n_directions * blockIdx.y;
+    d_output += n_vectors * blockIdx.y;
+
+    int i0     = threadIdx.x + blockIdx.x * blockDim.x;
+    int stride = gridDim.x * blockDim.x;
+
+    unsigned int g = i0 ^ (i0 >> 1);
+
+    unsigned int X = 0;
+    unsigned int mask;
+
+    for (unsigned int k = 0 ; k < __ffs(stride) - 1 ; k++)
+    {
+        mask = - (g & 1);
+        X ^= mask & d_directions[k];
+        g = g >> 1;
+    }
+
+    if (i0 < n_vectors)
+    {
+        d_output[i0] = (float)X * k_2powneg32;
+    }
+
+    unsigned int v_log2stridem1 = d_directions[__ffs(stride) - 2];
+    unsigned int v_stridemask = stride - 1;
+
+    for (unsigned int i = i0 + stride ; i < n_vectors ; i += stride)
+    {
+        X ^= v_log2stridem1 ^ d_directions[__ffs(~((i - stride) | v_stridemask)) - 1];
+        d_output[i] = (float)X * k_2powneg32;
+    }
+}
+
+double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+                unsigned int *d_directions, float *d_output)
+{
+    const int threadsperblock = 64;
+
+
+    dim3 dimGrid;
+    dim3 dimBlock;
+
+
+
+
+
+    dimGrid.y = n_dimensions;
+
+
+
+
+
+    if (n_dimensions < (4 * 24))
+    {
+        dimGrid.x = 4 * 24;
+    }
+    else
+    {
+        dimGrid.x = 1;
+    }
+
+
+    if (dimGrid.x > (unsigned int)(n_vectors / threadsperblock))
+    {
+        dimGrid.x = (n_vectors + threadsperblock - 1) / threadsperblock;
+    }
+
+
+
+    unsigned int targetDimGridX = dimGrid.x;
+    for (dimGrid.x = 1 ; dimGrid.x < targetDimGridX ; dimGrid.x *= 2);
+
+
+    dimBlock.x = threadsperblock;
+
+    cudaDeviceSynchronize();
+    auto start = std::chrono::steady_clock::now();
+
+
+    for (int i = 0; i < repeat; i++)
+      sobolGPU_kernel <<<dimGrid, dimBlock>>> (
+        n_vectors, n_dimensions, d_directions, d_output);
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    return time;
+}
+```
+```json
+{
+"optimizations": [
+{
+"lines": [
+47,
+57,
+58,
+59,
+60,
+63
+],
+"reason": "Removed the use of shared memory to cache `d_directions`. The performance analysis (Roofline #2) indicates that high `stall_short_sb_ratio` is caused by shared memory operations. The divergent access pattern on line 134 leads to severe shared memory bank conflicts. Removing the explicit caching stage and the associated `__syncthreads()` barrier (line 63) eliminates these short scoreboard stalls and barrier stalls (`stall_barrier_ratio`)."
+},
+{
+"lines": [
+90,
+123,
+134
+],
+"reason": "Accesses to the shared memory array `v` were replaced with direct reads from the global memory pointer `d_directions`. This change is motivated by the need to eliminate shared memory bank conflicts. On modern GPUs, these global reads will be cached in L1. While the access on line 134 is divergent, relying on the L1 cache to handle these random-access reads is often more performant than the serialization caused by shared memory bank conflicts. The uniform accesses on lines 90 and 123 become efficient, broadcasted, cached global reads."
+}
+],
+"suggested_but_not_applied": [
+{
+"lines": [
+42
+],
+"reason": "The `d_directions` pointer is used for read-only data. Performance could potentially be improved by using the texture or constant memory caches, which are optimized for certain access patterns. However, this would require changing the kernel signature and host-side code to bind the memory to a texture or constant symbol, which is disallowed by the instructions."
+},
+{
+"lines": [
+96,
+135
+],
+"reason": "The performance analysis (Roofline #4) suggests converting non-fused FP32 instructions to fused multiply-add (FMA) instructions to improve performance. The floating-point calculations in this kernel consist of a single multiplication. Since there is no subsequent addition, an FMA instruction cannot be formed without fundamentally changing the algorithm."
+}
+]
+}
+```

@@ -1,0 +1,7 @@
+nvlink error   : Entry function '_Z7rhs4_v2ILb0ELb0EEviiiiiiiiiPdPKdS2_S2_S2_S2_S2_S2_S2_S2_dd' uses too much shared data (0xc4e0 bytes, 0xc000 max)
+nvlink error   : Entry function '_Z7rhs4_v2ILb1ELb0EEviiiiiiiiiPdPKdS2_S2_S2_S2_S2_S2_S2_S2_dd' uses too much shared data (0xc4e0 bytes, 0xc000 max)
+nvlink error   : Entry function '_Z7rhs4_v2ILb0ELb1EEviiiiiiiiiPdPKdS2_S2_S2_S2_S2_S2_S2_S2_dd' uses too much shared data (0xc4e0 bytes, 0xc000 max)
+nvlink error   : Entry function '_Z7rhs4_v2ILb1ELb1EEviiiiiiiiiPdPKdS2_S2_S2_S2_S2_S2_S2_S2_dd' uses too much shared data (0xc4e0 bytes, 0xc000 max)
+make[2]: *** [CMakeFiles/sw4lite.dir/build.make:677: CMakeFiles/sw4lite.dir/cmake_device_link.o] Error 255
+make[1]: *** [CMakeFiles/Makefile2:87: CMakeFiles/sw4lite.dir/all] Error 2
+make: *** [Makefile:91: all] Error 2

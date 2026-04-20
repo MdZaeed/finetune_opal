@@ -1,0 +1,192 @@
+# Begin Source Code
+```cpp```
+1:
+34:
+35: #include "sobol.h"
+36: #include "sobol_gpu.h"
+37:
+38: #define k_2powneg32 2.3283064E-10F
+39:
+40: __global__
+41: void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+42:                      unsigned *__restrict__ d_directions,
+43:                      float *__restrict__ d_output)
+44: {
+45:
+46:
+47:     __shared__ unsigned int v[n_directions];
+48:
+49:
+50:
+51:     d_directions += n_directions * blockIdx.y;
+52:     d_output += n_vectors * blockIdx.y;
+53:
+54:
+55:
+56:
+57:     if (threadIdx.x < n_directions)
+58:     {
+59:         v[threadIdx.x] = d_directions[threadIdx.x];
+60:     }
+61:
+62:
+63:     __syncthreads();
+64:
+65:
+66:
+67:
+68:     int i0     = threadIdx.x + blockIdx.x * blockDim.x;
+69:     int stride = gridDim.x * blockDim.x;
+70:
+71:
+72:
+73:
+74:     unsigned int g = i0 ^ (i0 >> 1);
+75:
+76:
+77:
+78:
+79:
+80:     unsigned int X = 0;
+81:     unsigned int mask;
+82:
+83:     for (unsigned int k = 0 ; k < __ffs(stride) - 1 ; k++)
+84:     {
+85:
+86:
+87:
+88:
+89:         mask = - (g & 1);
+90:         X ^= mask & v[k];
+91:         g = g >> 1;
+92:     }
+93:
+94:     if (i0 < n_vectors)
+95:     {
+96:         d_output[i0] = (float)X * k_2powneg32;
+97:     }
+98:
+99:
+100:
+101:
+102:
+103:
+104:
+105:
+106:
+107:
+108:
+109:
+110:
+111:
+112:
+113:
+114:
+115:
+116:
+117:
+118:
+119:
+120:
+121:
+122:
+123:     unsigned int v_log2stridem1 = v[__ffs(stride) - 2];
+124:     unsigned int v_stridemask = stride - 1;
+125:
+126:     for (unsigned int i = i0 + stride ; i < n_vectors ; i += stride)
+127:     {
+128:
+129:
+130:
+131:
+132:
+133:
+134:         X ^= v_log2stridem1 ^ v[__ffs(~((i - stride) | v_stridemask)) - 1];
+135:         d_output[i] = (float)X * k_2powneg32;
+136:     }
+137: }
+138:
+139: double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+140:                 unsigned int *d_directions, float *d_output)
+141: {
+142:     const int threadsperblock = 64;
+143:
+144:
+145:     dim3 dimGrid;
+146:     dim3 dimBlock;
+147:
+148:
+149:
+150:
+151:
+152:
+153:
+154:     dimGrid.y = n_dimensions;
+155:
+156:
+157:
+158:
+159:
+160:     if (n_dimensions < (4 * 24))
+161:     {
+162:         dimGrid.x = 4 * 24;
+163:     }
+164:     else
+165:     {
+166:         dimGrid.x = 1;
+167:     }
+168:
+169:
+170:     if (dimGrid.x > (unsigned int)(n_vectors / threadsperblock))
+171:     {
+172:         dimGrid.x = (n_vectors + threadsperblock - 1) / threadsperblock;
+173:     }
+174:
+175:
+176:
+177:     unsigned int targetDimGridX = dimGrid.x;
+178:     for (dimGrid.x = 1 ; dimGrid.x < targetDimGridX ; dimGrid.x *= 2);
+179:
+180:
+181:     dimBlock.x = threadsperblock;
+182:
+183:     cudaDeviceSynchronize();
+184:     auto start = std::chrono::steady_clock::now();
+185:
+186:
+187:     for (int i = 0; i < repeat; i++)
+188:       sobolGPU_kernel <<<dimGrid, dimBlock>>> (
+189:         n_vectors, n_dimensions, d_directions, d_output);
+190:
+191:     cudaDeviceSynchronize();
+192:     auto end = std::chrono::steady_clock::now();
+193:     double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+194:     return time;
+195: }
+196:
+```cpp```
+# End Source Code
+# Begin Performance Analysis
+
+### IMPORTANT HARDWARE COUNTERS:
+Kernel: sobolGPU_kernel(unsigned_int__unsigned_int__unsigned_int_*__float_*), Group: dram_, Counter: dram__bytes_write.sum, Impact: 0.3387295001667894, Description: Total bytes written in the DRAM subsystem. A high value negatively impacts performance through stalls such as stall_memory_dependency, stall_long_scoreboard, or stall_dram_throttle. Do not suggest __int_as_float for faster integer to float conversion.
+Kernel: sobolGPU_kernel(unsigned_int__unsigned_int__unsigned_int_*__float_*), Group: N_TCC, Counter: l1tex__m_l1tex2xbar_write_bytes.sum, Impact: 0.3281814101516831, Description: Texture cache or texture unit behavior in the L1TEX subsystem. A high value indicates excessive write traffic from L1/TEX units to the GPU's crossbar, potentially saturating internal bandwidth. Causes stalls like stall_l1tex or stall_memory_dependency. Do not suggest __int_as_float for faster integer to float conversion.
+Kernel: sobolGPU_kernel(unsigned_int__unsigned_int__unsigned_int_*__float_*), Group: N_TCC, Counter: l1tex__m_l1tex2xbar_write_bytes.sum.pct_of_peak_sustained_elapsed, Impact: 0.26317861650873087, Description: Percentage of peak sustained hardware capability, Store instructions, Texture cache or texture unit behavior in the L1TEX subsystem.A high value indicates heavy write traffic from the L1/TEX units saturating the GPU's internal crossbar bandwidth causing stall cycles such as stall_mio_ratio, stall_l1tex, or stall_memory_dependency, as execution units wait for available interconnect bandwidth. Do not suggest __int_as_float for faster integer to float conversion. It is not a safe optimization..
+
+# End Performance Analysis
+# Instructions
+You must optimize the source code provided above using only the performance data provided above. 
+
+Can you give me the fixed optimized code that will replace the full source code including headers and main function body?
+2. Do not add line numbers to the generated code. 
+3. Do not rename or duplicate any kernel or function.
+4. Do not change any function signatures.
+5. Use the performance analysis reference number(s) to guide your changes.
+6. Return:
+   (a) the full source code including the optimized kernels inside ``` block (starts with ``` and ends with ``` )
+   (b) optimizations list = [{'lines': [...], 'reason': '...'}]
+   (c) suggested_but_not_applied list = [{'lines': [...], 'reason': '...'}]
+7. Do not generate more than one copy of the same kernel.
+8. Do not invent any new kernels or placeholder code.
+
+ONLY respond with the updated code and two structured lists. No explanation, no notes, no markdown titles. Follow this format exactly.

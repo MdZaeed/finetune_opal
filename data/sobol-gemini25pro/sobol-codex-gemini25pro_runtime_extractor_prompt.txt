@@ -1,0 +1,17 @@
+You are generating a bash script that extracts runtime information from a program output log.
+Return ONLY a bash script inside one fenced code block. Do not add explanation.
+Requirements:
+1. The script must accept exactly one argument: the path to the text log file.
+2. The script must parse the runtime from that file.
+3. Print the result in exactly one line using this format: runtime_ms=<number>
+4. If the log contains multiple runtime-like values, prefer the final end-to-end runtime or the most explicit average runtime.
+5. If no runtime can be found, print a clear error to stderr and exit with a non-zero status.
+6. Use portable bash plus standard tools like grep, sed, awk, or perl.
+7. Do not hardcode file paths.
+
+Here is the sample log:
+# Begin Log
+cat run.sh >run 
+chmod a+x run
+
+# End Log

@@ -1,0 +1,11 @@
+{
+  "dataset_path": "data/finetune/val.jsonl",
+  "record_count": 4,
+  "selection_rule": "last example from each group in sorted input order",
+  "groups": {
+    "accuracy-codex-gpt5": 1,
+    "adjacent-codex-gpt5": 1,
+    "shmembench-codex-gpt5": 1,
+    "sobol-codex-gpt5": 1
+  }
+}

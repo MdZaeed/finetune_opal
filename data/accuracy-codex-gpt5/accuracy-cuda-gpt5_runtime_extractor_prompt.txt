@@ -1,0 +1,39 @@
+You are generating a bash script that extracts runtime information from a program output log.
+Return ONLY a bash script inside one fenced code block. Do not add explanation.
+Requirements:
+1. The script must accept exactly one argument: the path to the text log file.
+2. The script must parse the runtime from that file.
+3. Print the result in exactly one line using this format: runtime_ms=<number>
+4. If the log contains multiple runtime-like values, prefer the final end-to-end runtime or the most explicit average runtime.
+5. If no runtime can be found, print a clear error to stderr and exit with a non-zero status.
+6. Use portable bash plus standard tools like grep, sed, awk, or perl.
+7. Do not hardcode file paths.
+
+Here is the sample log:
+# Begin Log
+rm -rf main main.o
+nvcc  -std=c++14 -Xcompiler -Wall -arch=sm_80 -lineinfo -O3 -c main.cu -o main.o
+nvcc  -std=c++14 -Xcompiler -Wall -arch=sm_80 -lineinfo -O3 main.o -o main 
+./main 8192 10000 10 100
+Grid size is 2048
+Average execution time of accuracy kernel: 536.256653 (us)
+PASS
+Average execution time of accuracy kernel2: 187.446426 (us)
+PASS
+Grid size is 4096
+Average execution time of accuracy kernel: 179.440002 (us)
+PASS
+Average execution time of accuracy kernel2: 179.395111 (us)
+PASS
+Grid size is 6144
+Average execution time of accuracy kernel: 177.887741 (us)
+PASS
+Average execution time of accuracy kernel2: 177.990524 (us)
+PASS
+Grid size is 8192
+Average execution time of accuracy kernel: 178.486328 (us)
+PASS
+Average execution time of accuracy kernel2: 178.616821 (us)
+PASS
+
+# End Log

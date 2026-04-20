@@ -1,0 +1,495 @@
+```
+__global__ void rhs4_Kboundary (int ifirst, int ilast, int jfirst, int jlast,
+			   int ni, int nj, int nk, int nz,
+			   float_sw4* __restrict__ a_up,
+			   const float_sw4* __restrict__ a_u,
+			   const float_sw4* __restrict__ a_um,
+			   const float_sw4* __restrict__ a_mu,
+			   const float_sw4* __restrict__ a_lambda,
+			   const float_sw4* __restrict__ a_rho,
+			   const float_sw4* __restrict__ a_fo,
+			   const float_sw4* __restrict__ a_strx,
+			   const float_sw4* __restrict__ a_stry,
+			   const float_sw4 h,
+			   const float_sw4 dt) {
+  int index;
+  const float_sw4 i6   = 1.0 / 6;
+  const float_sw4 i12  = 1.0 / 12;
+  const float_sw4 i144 = 1.0 / 144;
+  const float_sw4 tf   = 0.75;
+
+  float_sw4 mux1, mux2, mux3, mux4, muy1, muy2, muy3, muy4;
+  float_sw4 r1, r2, r3, cof, mu1zz, mu2zz, mu3zz;
+  float_sw4 u3zip2, u3zip1, u3zim1, u3zim2, lau3zx, mu3xz, u3zjp2, u3zjp1, u3zjm1, u3zjm2;
+  float_sw4 lau3zy, mu3yz, mu1zx, mu2zy, u1zip2, u1zip1, u1zim1, u1zim2;
+  float_sw4 u2zjp2, u2zjp1, u2zjm1, u2zjm2, lau1xz, lau2yz;
+
+  float_sw4 strx_im2, strx_im1, strx_i, strx_ip1, strx_ip2;
+  float_sw4 stry_jm2, stry_jm1, stry_j, stry_jp1, stry_jp2;
+
+  int active=0, loadx1=0, loadx2=0, loady1=0, loady2=0, loady3=0;
+
+  __shared__ float_sw4 shu[3][8][2+4][UX+4];
+  __shared__ float_sw4 shl[8][2+4][UX+4];
+  __shared__ float_sw4 shm[8][2+4][UX+4];
+
+  const int i = threadIdx.x + blockIdx.x * UX;
+  const int j = jfirst + threadIdx.y + blockIdx.y * 2;
+  int k;
+
+  if(low)
+    k = threadIdx.z;
+  else
+    k = nz-6;
+
+  const int ti = threadIdx.x + 2;
+  const int tj = threadIdx.y + 2;
+  const int tk = threadIdx.z;
+
+  const int nij = ni * nj;
+  const int nijk = nij * nk;
+
+  if (i >= ifirst && i <= ilast && j <= jlast)
+    active = 1;
+
+  if (i-2 >= 0 && i-2 < ni)
+    loadx1 = 1;
+  if (threadIdx.x < 4 && i-2+UX < ni)
+    loadx2 = 1;
+  if (j-2 < nj)
+    loady1 = 1;
+  if (j < nj)
+    loady2 = 1;
+  if (j+2 < nj)
+    loady3 = 1;
+
+  float_sw4 u0, u1, u2;
+  if(low)
+  {
+    index = 1 * nij + j * ni + i;
+    u0 = u(0,index);
+    u1 = u(1,index);
+    u2 = u(2,index);
+  }
+  else
+  {
+    index = (nz+1) * nij + j * ni + i;
+    u0 = u(0,index);
+    u1 = u(1,index);
+    u2 = u(2,index);
+  }
+
+  index = (k + 2) * nij + (j - 2) * ni + i - 2;
+
+  if (loady1) {
+    int idx = index;
+    if (loadx1) {
+      shu[0][threadIdx.z][threadIdx.y][threadIdx.x] = u(0,idx);
+      shu[1][threadIdx.z][threadIdx.y][threadIdx.x] = u(1,idx);
+      shu[2][threadIdx.z][threadIdx.y][threadIdx.x] = u(2,idx);
+      shl[threadIdx.z][threadIdx.y][threadIdx.x] = __ldg(&a_lambda[idx]);
+      shm[threadIdx.z][threadIdx.y][threadIdx.x] = __ldg(&a_mu[idx]);
+    }
+    if (loadx2) {
+      shu[0][threadIdx.z][threadIdx.y][threadIdx.x+UX] = u(0,idx+UX);
+      shu[1][threadIdx.z][threadIdx.y][threadIdx.x+UX] = u(1,idx+UX);
+      shu[2][threadIdx.z][threadIdx.y][threadIdx.x+UX] = u(2,idx+UX);
+      shl[threadIdx.z][threadIdx.y][threadIdx.x+UX] = __ldg(&a_lambda[idx+UX]);
+      shm[threadIdx.z][threadIdx.y][threadIdx.x+UX] = __ldg(&a_mu[idx+UX]);
+    }
+    if (threadIdx.z < 2) {
+      idx += 6 * nij;
+      if (loadx1) {
+        shu[0][threadIdx.z+6][threadIdx.y][threadIdx.x] = u(0,idx);
+        shu[1][threadIdx.z+6][threadIdx.y][threadIdx.x] = u(1,idx);
+        shu[2][threadIdx.z+6][threadIdx.y][threadIdx.x] = u(2,idx);
+        shl[threadIdx.z+6][threadIdx.y][threadIdx.x] = __ldg(&a_lambda[idx]);
+        shm[threadIdx.z+6][threadIdx.y][threadIdx.x] = __ldg(&a_mu[idx]);
+      }
+      if (loadx2) {
+        shu[0][threadIdx.z+6][threadIdx.y][threadIdx.x+UX] = u(0,idx+UX);
+        shu[1][threadIdx.z+6][threadIdx.y][threadIdx.x+UX] = u(1,idx+UX);
+        shu[2][threadIdx.z+6][threadIdx.y][threadIdx.x+UX] = u(2,idx+UX);
+        shl[threadIdx.z+6][threadIdx.y][threadIdx.x+UX] = __ldg(&a_lambda[idx+UX]);
+        shm[threadIdx.z+6][threadIdx.y][threadIdx.x+UX] = __ldg(&a_mu[idx+UX]);
+      }
+    }
+  }
+
+  if (loady2) {
+    int idx = index + 2 * ni;
+    if (loadx1) {
+      shu[0][threadIdx.z][threadIdx.y+2][threadIdx.x] = u(0,idx);
+      shu[1][threadIdx.z][threadIdx.y+2][threadIdx.x] = u(1,idx);
+      shu[2][threadIdx.z][threadIdx.y+2][threadIdx.x] = u(2,idx);
+      shl[threadIdx.z][threadIdx.y+2][threadIdx.x] = __ldg(&a_lambda[idx]);
+      shm[threadIdx.z][threadIdx.y+2][threadIdx.x] = __ldg(&a_mu[idx]);
+    }
+    if (loadx2) {
+      shu[0][threadIdx.z][threadIdx.y+2][threadIdx.x+UX] = u(0,idx+UX);
+      shu[1][threadIdx.z][threadIdx.y+2][threadIdx.x+UX] = u(1,idx+UX);
+      shu[2][threadIdx.z][threadIdx.y+2][threadIdx.x+UX] = u(2,idx+UX);
+      shl[threadIdx.z][threadIdx.y+2][threadIdx.x+UX] = __ldg(&a_lambda[idx+UX]);
+      shm[threadIdx.z][threadIdx.y+2][threadIdx.x+UX] = __ldg(&a_mu[idx+UX]);
+    }
+    if (threadIdx.z < 2) {
+      idx += 6 * nij;
+      if (loadx1) {
+        shu[0][threadIdx.z+6][threadIdx.y+2][threadIdx.x] = u(0,idx);
+        shu[1][threadIdx.z+6][threadIdx.y+2][threadIdx.x] = u(1,idx);
+        shu[2][threadIdx.z+6][threadIdx.y+2][threadIdx.x] = u(2,idx);
+        shl[threadIdx.z+6][threadIdx.y+2][threadIdx.x] = __ldg(&a_lambda[idx]);
+        shm[threadIdx.z+6][threadIdx.y+2][threadIdx.x] = __ldg(&a_mu[idx]);
+      }
+      if (loadx2) {
+        shu[0][threadIdx.z+6][threadIdx.y+2][threadIdx.x+UX] = u(0,idx+UX);
+        shu[1][threadIdx.z+6][threadIdx.y+2][threadIdx.x+UX] = u(1,idx+UX);
+        shu[2][threadIdx.z+6][threadIdx.y+2][threadIdx.x+UX] = u(2,idx+UX);
+        shl[threadIdx.z+6][threadIdx.y+2][threadIdx.x+UX] = __ldg(&a_lambda[idx+UX]);
+        shm[threadIdx.z+6][threadIdx.y+2][threadIdx.x+UX] = __ldg(&a_mu[idx+UX]);
+      }
+    }
+  }
+
+  if (loady3) {
+    int idx = index + 4 * ni;
+    if (loadx1) {
+      shu[0][threadIdx.z][threadIdx.y+4][threadIdx.x] = u(0,idx);
+      shu[1][threadIdx.z][threadIdx.y+4][threadIdx.x] = u(1,idx);
+      shu[2][threadIdx.z][threadIdx.y+4][threadIdx.x] = u(2,idx);
+      shl[threadIdx.z][threadIdx.y+4][threadIdx.x] = __ldg(&a_lambda[idx]);
+      shm[threadIdx.z][threadIdx.y+4][threadIdx.x] = __ldg(&a_mu[idx]);
+    }
+    if (loadx2) {
+      shu[0][threadIdx.z][threadIdx.y+4][threadIdx.x+UX] = u(0,idx+UX);
+      shu[1][threadIdx.z][threadIdx.y+4][threadIdx.x+UX] = u(1,idx+UX);
+      shu[2][threadIdx.z][threadIdx.y+4][threadIdx.x+UX] = u(2,idx+UX);
+      shl[threadIdx.z][threadIdx.y+4][threadIdx.x+UX] = __ldg(&a_lambda[idx+UX]);
+      shm[threadIdx.z][threadIdx.y+4][threadIdx.x+UX] = __ldg(&a_mu[idx+UX]);
+    }
+    if (threadIdx.z < 2) {
+      idx += 6 * nij;
+      if (loadx1) {
+        shu[0][threadIdx.z+6][threadIdx.y+4][threadIdx.x] = u(0,idx);
+        shu[1][threadIdx.z+6][threadIdx.y+4][threadIdx.x] = u(1,idx);
+        shu[2][threadIdx.z+6][threadIdx.y+4][threadIdx.x] = u(2,idx);
+        shl[threadIdx.z+6][threadIdx.y+4][threadIdx.x] = __ldg(&a_lambda[idx]);
+        shm[threadIdx.z+6][threadIdx.y+4][threadIdx.x] = __ldg(&a_mu[idx]);
+      }
+      if (loadx2) {
+        shu[0][threadIdx.z+6][threadIdx.y+4][threadIdx.x+UX] = u(0,idx+UX);
+        shu[1][threadIdx.z+6][threadIdx.y+4][threadIdx.x+UX] = u(1,idx+UX);
+        shu[2][threadIdx.z+6][threadIdx.y+4][threadIdx.x+UX] = u(2,idx+UX);
+        shl[threadIdx.z+6][threadIdx.y+4][threadIdx.x+UX] = __ldg(&a_lambda[idx+UX]);
+        shm[threadIdx.z+6][threadIdx.y+4][threadIdx.x+UX] = __ldg(&a_mu[idx+UX]);
+      }
+    }
+  }
+  __syncthreads();
+
+  if (active) {
+
+    // Read-only cache for strx/stry
+    strx_im2 = __ldg(&a_strx[i-2]);
+    strx_im1 = __ldg(&a_strx[i-1]);
+    strx_i   = __ldg(&a_strx[i]);
+    strx_ip1 = __ldg(&a_strx[i+1]);
+    strx_ip2 = __ldg(&a_strx[i+2]);
+
+    stry_jm2 = __ldg(&a_stry[j-2]);
+    stry_jm1 = __ldg(&a_stry[j-1]);
+    stry_j   = __ldg(&a_stry[j]);
+    stry_jp1 = __ldg(&a_stry[j+1]);
+    stry_jp2 = __ldg(&a_stry[j+2]);
+
+    cof = 1.0 / (h * h);
+
+    // Row pointers to reduce shared memory address calculation
+    float_sw4* __restrict__ shm_row_tj   = &shm[tk][tj][0];
+    float_sw4* __restrict__ shl_row_tj   = &shl[tk][tj][0];
+    float_sw4* __restrict__ shm_row_tjm1 = &shm[tk][tj-1][0];
+    float_sw4* __restrict__ shm_row_tjm2 = &shm[tk][tj-2][0];
+    float_sw4* __restrict__ shm_row_tjp1 = &shm[tk][tj+1][0];
+    float_sw4* __restrict__ shm_row_tjp2 = &shm[tk][tj+2][0];
+    float_sw4* __restrict__ shl_row_tjm1 = &shl[tk][tj-1][0];
+    float_sw4* __restrict__ shl_row_tjm2 = &shl[tk][tj-2][0];
+    float_sw4* __restrict__ shl_row_tjp1 = &shl[tk][tj+1][0];
+    float_sw4* __restrict__ shl_row_tjp2 = &shl[tk][tj+2][0];
+
+    float_sw4 strx_stry = strx_i * stry_j;
+
+    mux1 = shm_row_tj[ti-1] * strx_im1 - tf * (shm_row_tj[ti] * strx_i + shm_row_tj[ti-2] * strx_im2);
+    mux2 = shm_row_tj[ti-2] * strx_im2 + shm_row_tj[ti+1] * strx_ip1 + 3 * (shm_row_tj[ti] * strx_i + shm_row_tj[ti-1] * strx_im1);
+    mux3 = shm_row_tj[ti-1] * strx_im1 + shm_row_tj[ti+2] * strx_ip2 + 3 * (shm_row_tj[ti+1] * strx_ip1 + shm_row_tj[ti] * strx_i);
+    mux4 = shm_row_tj[ti+1] * strx_ip1 - tf * (shm_row_tj[ti]* strx_i + shm_row_tj[ti+2] * strx_ip2);
+
+    muy1 = shm_row_tjm1[ti] * stry_jm1 - tf * (shm_row_tj[ti]* stry_j + shm_row_tjm2[ti] * stry_jm2);
+    muy2 = shm_row_tjm2[ti] * stry_jm2 + shm_row_tjp1[ti] * stry_jp1 + 3 * (shm_row_tj[ti] * stry_j + shm_row_tjm1[ti] * stry_jm1);
+    muy3 = shm_row_tjm1[ti] * stry_jm1 + shm_row_tjp2[ti] * stry_jp2 + 3 * (shm_row_tjp1[ti] * stry_jp1 + shm_row_tj[ti] * stry_j);
+    muy4 = shm_row_tjp1[ti] * stry_jp1 - tf * (shm_row_tj[ti]* stry_j + shm_row_tjp2[ti] * stry_jp2);
+
+    r1 = i6 * (strx_i *
+	       ((2 * mux1 + shl_row_tj[ti-1] * strx_im1 - tf *
+		 (shl_row_tj[ti] * strx_i + shl_row_tj[ti-2] * strx_im2)) *
+		(shu[0][tk][tj][ti-2] - shu[0][tk][tj][ti]) +
+		(2 * mux2 + shl_row_tj[ti-2] * strx_im2 + shl_row_tj[ti+1] * strx_ip1 + 3 *
+		 (shl_row_tj[ti] * strx_i + shl_row_tj[ti-1] * strx_im1)) *
+		(shu[0][tk][tj][ti-1] - shu[0][tk][tj][ti]) +
+		(2 * mux3 + shl_row_tj[ti-1] * strx_im1 + shl_row_tj[ti+2] * strx_ip2 + 3 *
+		 (shl_row_tj[ti+1] * strx_ip1 + shl_row_tj[ti] * strx_i)) *
+		(shu[0][tk][tj][ti+1] - shu[0][tk][tj][ti]) +
+                (2 * mux4 + shl_row_tj[ti+1] * strx_ip1 - tf *
+		 (shl_row_tj[ti] * strx_i + shl_row_tj[ti+2] * strx_ip2)) *
+		(shu[0][tk][tj][ti+2] - shu[0][tk][tj][ti]) ) +
+	       stry_j * (muy1 * (shu[0][tk][tj-2][ti] - shu[0][tk][tj][ti]) +
+			    muy2 * (shu[0][tk][tj-1][ti] - shu[0][tk][tj][ti]) +
+			    muy3 * (shu[0][tk][tj+1][ti] - shu[0][tk][tj][ti]) +
+			    muy4 * (shu[0][tk][tj+2][ti] - shu[0][tk][tj][ti]) ) );
+
+    mu1zz = 0;
+    mu2zz = 0;
+    mu3zz = 0;
+    #pragma unroll 8
+    for (int q=0; q<8; q++) {
+      int qi = (low)? q: (7-q);
+      float_sw4 lap2mu = 0;
+      float_sw4 mucof  = 0;
+      int idx = q * 6 + k;
+      #pragma unroll 8
+      for (int m=0 ; m<8; m++) {
+        int mi = (low)? m: (7-m);
+	mucof  += __ldg(&dev_acof[idx]) * shm[mi][tj][ti];
+	lap2mu += __ldg(&dev_acof[idx]) * (shl[mi][tj][ti] + 2 * shm[mi][tj][ti]);
+	idx += 48;
+      }
+      mu1zz += mucof * shu[0][qi][tj][ti];
+      mu2zz += mucof * shu[1][qi][tj][ti];
+      mu3zz += lap2mu * shu[2][qi][tj][ti];
+    }
+
+    if(low)
+      r1 += mu1zz + __ldg(&dev_ghcof[k]) * shm[0][tj][ti] * u0;
+    else
+      r1 += mu1zz + __ldg(&dev_ghcof[k]) * shm[7][tj][ti] * u0;
+
+    r2 = i6 * (strx_i *
+	       (mux1 * (shu[1][tk][tj][ti-2] - shu[1][tk][tj][ti]) +
+		mux2 * (shu[1][tk][tj][ti-1] - shu[1][tk][tj][ti]) +
+		mux3 * (shu[1][tk][tj][ti+1] - shu[1][tk][tj][ti]) +
+		mux4 * (shu[1][tk][tj][ti+2] - shu[1][tk][tj][ti]) ) +
+	       stry_j *
+	       ((2 * muy1 + shl_row_tjm1[ti] * stry_jm1 - tf *
+		 (shl_row_tj[ti] * stry_j + shl_row_tjm2[ti] * stry_jm2)) *
+		(shu[1][tk][tj-2][ti] - shu[1][tk][tj][ti]) +
+		(2 * muy2 + shl_row_tjm2[ti] * stry_jm2 + shl_row_tjp1[ti] * stry_jp1 + 3 *
+		 (shl_row_tj[ti] * stry_j + shl_row_tjm1[ti] * stry_jm1)) *
+		(shu[1][tk][tj-1][ti] - shu[1][tk][tj][ti]) +
+		(2 * muy3 + shl_row_tjm1[ti] * stry_jm1 + shl_row_tjp2[ti] * stry_jp2 + 3 *
+		 (shl_row_tjp1[ti] * stry_jp1 + shl_row_tj[ti] * stry_j)) *
+		(shu[1][tk][tj+1][ti] - shu[1][tk][tj][ti]) +
+		(2 * muy4 + shl_row_tjp1[ti] * stry_jp1 - tf *
+		 (shl_row_tj[ti] * stry_j + shl_row_tjp2[ti] * stry_jp2)) *
+		(shu[1][tk][tj+2][ti] - shu[1][tk][tj][ti]) ) );
+
+    if(low)
+      r2 += mu2zz + __ldg(&dev_ghcof[k]) * shm[0][tj][ti] * u1;
+    else
+      r2 += mu2zz + __ldg(&dev_ghcof[k]) * shm[7][tj][ti] * u1;
+
+    r3 = i6 * (strx_i * (mux1 * (shu[2][tk][tj][ti-2] - shu[2][tk][tj][ti]) +
+			    mux2 * (shu[2][tk][tj][ti-1] - shu[2][tk][tj][ti]) +
+			    mux3 * (shu[2][tk][tj][ti+1] - shu[2][tk][tj][ti]) +
+			    mux4 * (shu[2][tk][tj][ti+2] - shu[2][tk][tj][ti])  ) +
+	       stry_j * (muy1 * (shu[2][tk][tj-2][ti] - shu[2][tk][tj][ti]) +
+			    muy2 * (shu[2][tk][tj-1][ti] - shu[2][tk][tj][ti]) +
+			    muy3 * (shu[2][tk][tj+1][ti] - shu[2][tk][tj][ti]) +
+			    muy4 * (shu[2][tk][tj+2][ti] - shu[2][tk][tj][ti]) ) );
+
+    if(low)
+      r3 += mu3zz + __ldg(&dev_ghcof[k]) * (shl[0][tj][ti] + 2 * shm[0][tj][ti]) * u2;
+    else
+      r3 += mu3zz + __ldg(&dev_ghcof[k]) * (shl[7][tj][ti] + 2 * shm[7][tj][ti]) * u2;
+
+    r1 = r1 + strx_stry *
+      (i144 * (shl_row_tj[ti-2] * (shu[1][tk][tj-2][ti-2] - shu[1][tk][tj+2][ti-2] + 8 *
+					(-shu[1][tk][tj-1][ti-2] + shu[1][tk][tj+1][ti-2])) - 8 *
+	       (shl_row_tj[ti-1] * (shu[1][tk][tj-2][ti-1] - shu[1][tk][tj+2][ti-1] + 8 *
+					 (-shu[1][tk][tj-1][ti-1] + shu[1][tk][tj+1][ti-1])) )+ 8 *
+	       (shl_row_tj[ti+1] * (shu[1][tk][tj-2][ti+1] - shu[1][tk][tj+2][ti+1] + 8 *
+					 (-shu[1][tk][tj-1][ti+1] + shu[1][tk][tj+1][ti+1])) ) -
+	       (shl_row_tj[ti+2] * (shu[1][tk][tj-2][ti+2] - shu[1][tk][tj+2][ti+2] + 8 *
+					 (-shu[1][tk][tj-1][ti+2] + shu[1][tk][tj+1][ti+2])) ))
+
+       + i144 * (shm[tk][tj-2][ti] * (shu[1][tk][tj-2][ti-2] - shu[1][tk][tj-2][ti+2] + 8 *
+					  (-shu[1][tk][tj-2][ti-1] + shu[1][tk][tj-2][ti+1])) - 8 *
+		 (shm[tk][tj-1][ti] * (shu[1][tk][tj-1][ti-2] - shu[1][tk][tj-1][ti+2] + 8 *
+					   (-shu[1][tk][tj-1][ti-1] + shu[1][tk][tj-1][ti+1])) ) + 8 *
+		 (shm[tk][tj+1][ti] * (shu[1][tk][tj+1][ti-2] - shu[1][tk][tj+1][ti+2] + 8 *
+					   (-shu[1][tk][tj+1][ti-1] + shu[1][tk][tj+1][ti+1])) ) -
+		 (shm[tk][tj+2][ti] * (shu[1][tk][tj+2][ti-2] - shu[1][tk][tj+2][ti+2] + 8 *
+					   (-shu[1][tk][tj+2][ti-1] + shu[1][tk][tj+2][ti+1])) )) );
+
+    u3zip2 = 0;
+    u3zip1 = 0;
+    u3zim1 = 0;
+    u3zim2 = 0;
+    #pragma unroll 8
+    for (int q=0; q<8; q++) {
+      int qi = (low) ? q : (7-q);
+      float_sw4 bope = __ldg(&dev_bope[q*6+k]);
+      u3zip2 += bope * shu[2][qi][tj][ti+2];
+      u3zip1 += bope * shu[2][qi][tj][ti+1];
+      u3zim1 += bope * shu[2][qi][tj][ti-1];
+      u3zim2 += bope * shu[2][qi][tj][ti-2];
+    }
+    lau3zx = i12 * (-shl_row_tj[ti+2] * u3zip2 + 8 *
+		    shl_row_tj[ti+1] * u3zip1 -8 *
+		    shl_row_tj[ti-1] * u3zim1 +
+		    shl_row_tj[ti-2] * u3zim2);
+    r1 += strx_i * lau3zx;
+
+    mu3xz = 0;
+    #pragma unroll 8
+    for (int q=0; q<8; q++) {
+      int qi = (low) ? q : (7-q);
+      mu3xz += __ldg(&dev_bope[q*6+k]) * (shm[qi][tj][ti] * i12 *
+				      (-shu[2][qi][tj][ti+2] + 8 * shu[2][qi][tj][ti+1]
+				       -8 * shu[2][qi][tj][ti-1] + shu[2][qi][tj][ti-2]));
+    }
+    r1 += strx_i * mu3xz;
+
+    r2 = r2 + strx_stry *
+      (i144 * (shm_row_tj[ti-2] * (shu[0][tk][tj-2][ti-2]-shu[0][tk][tj+2][ti-2] + 8*
+				      (-shu[0][tk][tj-1][ti-2]+shu[0][tk][tj+1][ti-2])) - 8*
+	       (shm_row_tj[ti-1] * (shu[0][tk][tj-2][ti-1]-shu[0][tk][tj+2][ti-1] + 8 *
+				       (-shu[0][tk][tj-1][ti-1]+shu[0][tk][tj+1][ti-1])) ) + 8 *
+	       (shm_row_tj[ti+1] * (shu[0][tk][tj-2][ti+1]-shu[0][tk][tj+2][ti+1] + 8*
+				       (-shu[0][tk][tj-1][ti+1]+shu[0][tk][tj+1][ti+1])) ) -
+	       (shm_row_tj[ti+2] * (shu[0][tk][tj-2][ti+2]-shu[0][tk][tj+2][ti+2] + 8 *
+				       (-shu[0][tk][tj-1][ti+2]+shu[0][tk][tj+1][ti+2])) ))
+
+       + i144*( shl[tk][tj-2][ti] * (shu[0][tk][tj-2][ti-2] - shu[0][tk][tj-2][ti+2] + 8 *
+					 (-shu[0][tk][tj-2][ti-1] + shu[0][tk][tj-2][ti+1])) - 8*
+		(shl[tk][tj-1][ti] * (shu[0][tk][tj-1][ti-2] - shu[0][tk][tj-1][ti+2] + 8 *
+					  (-shu[0][tk][tj-1][ti-1] + shu[0][tk][tj-1][ti+1])) ) + 8 *
+		(shl[tk][tj+1][ti] * (shu[0][tk][tj+1][ti-2] - shu[0][tk][tj+1][ti+2] + 8 *
+					  (-shu[0][tk][tj+1][ti-1] + shu[0][tk][tj+1][ti+1])) ) -
+		(shl[tk][tj+2][ti] * (shu[0][tk][tj+2][ti-2] - shu[0][tk][tj+2][ti+2] + 8 *
+					  (-shu[0][tk][tj+2][ti-1] + shu[0][tk][tj+2][ti+1])) )) );
+
+    u3zjp2 = 0;
+    u3zjp1 = 0;
+    u3zjm1 = 0;
+    u3zjm2 = 0;
+    #pragma unroll 8
+    for (int q=0; q<8; q++) {
+      int qi = (low) ? q : (7-q);
+      float_sw4 bope = __ldg(&dev_bope[q*6+k]);
+      u3zjp2 += bope * shu[2][qi][tj+2][ti];
+      u3zjp1 += bope * shu[2][qi][tj+1][ti];
+      u3zjm1 += bope * shu[2][qi][tj-1][ti];
+      u3zjm2 += bope * shu[2][qi][tj-2][ti];
+    }
+    lau3zy= i12 * (-shl[tk][tj+2][ti] * u3zjp2 + 8 *
+		   shl[tk][tj+1][ti] * u3zjp1 - 8 *
+		   shl[tk][tj-1][ti] * u3zjm1 +
+		   shl[tk][tj-2][ti] * u3zjm2);
+
+    r2 += stry_j * lau3zy;
+
+    mu3yz = 0;
+    #pragma unroll 8
+    for (int q=0; q<8; q++) {
+      int qi = (low) ? q : (7-q);
+      mu3yz += __ldg(&dev_bope[q*6+k]) *
+	(shm[qi][tj][ti] * i12 *
+	 (-shu[2][qi][tj+2][ti] + 8 * shu[2][qi][tj+1][ti] - 8 *
+	  shu[2][qi][tj-1][ti] + shu[2][qi][tj-2][ti]) );
+    }
+    r2 += stry_j * mu3yz;
+
+    u1zip2 = 0;
+    u1zip1 = 0;
+    u1zim1 = 0;
+    u1zim2 = 0;
+    #pragma unroll 8
+    for (int q=0; q<8; q++) {
+      int qi = (low) ? q : (7-q);
+      float_sw4 bope = __ldg(&dev_bope[q*6+k]);
+      u1zip2 += bope * shu[0][qi][tj][ti+2];
+      u1zip1 += bope * shu[0][qi][tj][ti+1];
+      u1zim1 += bope * shu[0][qi][tj][ti-1];
+      u1zim2 += bope * shu[0][qi][tj][ti-2];
+    }
+    mu1zx= i12 * (-shm_row_tj[ti+2] * u1zip2 + 8 *
+		  shm_row_tj[ti+1] * u1zip1 - 8 *
+		  shm_row_tj[ti-1] * u1zim1 +
+		  shm_row_tj[ti-2] * u1zim2);
+    r3 += strx_i * mu1zx;
+
+    u2zjp2 = 0;
+    u2zjp1 = 0;
+    u2zjm1 = 0;
+    u2zjm2 = 0;
+    #pragma unroll 8
+    for (int q=0; q<8; q++) {
+      int qi = (low) ? q : (7-q);
+      float_sw4 bope = __ldg(&dev_bope[q*6+k]);
+      u2zjp2 += bope * shu[1][qi][tj+2][ti];
+      u2zjp1 += bope * shu[1][qi][tj+1][ti];
+      u2zjm1 += bope * shu[1][qi][tj-1][ti];
+      u2zjm2 += bope * shu[1][qi][tj-2][ti];
+    }
+    mu2zy= i12 * (-shm[tk][tj+2][ti] * u2zjp2 + 8 *
+		  shm[tk][tj+1][ti] * u2zjp1 - 8 *
+		  shm[tk][tj-1][ti] * u2zjm1 +
+		  shm[tk][tj-2][ti] * u2zjm2);
+    r3 += stry_j * mu2zy;
+
+    lau1xz = 0;
+    #pragma unroll 8
+    for (int q=0; q<8; q++)
+    {
+      int qi = (low) ? q : (7-q);
+      lau1xz += __ldg(&dev_bope[q*6+k]) *
+	(shl[qi][tj][ti] * i12 *
+	 (-shu[0][qi][tj][ti+2] + 8 * shu[0][qi][tj][ti+1] - 8 *
+	  shu[0][qi][tj][ti-1] + shu[0][qi][tj][ti-2]) );
+    }
+    r3 += strx_i * lau1xz;
+
+    lau2yz = 0;
+    #pragma unroll 8
+    for (int q=0; q<8; q++)
+    {
+      int qi = (low) ? q : (7-q);
+      lau2yz += __ldg(&dev_bope[q*6+k]) *
+	(shl[qi][tj][ti] * i12 *
+	 (-shu[1][qi][tj+2][ti] + 8 * shu[1][qi][tj+1][ti] - 8 *
+	  shu[1][qi][tj-1][ti] + shu[1][qi][tj-2][ti]) );
+    }
+    r3 += stry_j * lau2yz;
+
+    index = (k + 2) * nij + j * ni + i;
+    if (pred) {
+
+      float_sw4 dt2 = dt*dt;
+      float_sw4 fact = dt2 / __ldg(&a_rho[index]);
+      up(0,index) = 2 * shu[0][tk][tj][ti] - um(0,index) + fact * (cof * r1 + fo(0,index));
+      up(1,index) = 2 * shu[1][tk][tj][ti] - um(1,index) + fact * (cof * r2 + fo(1,index));
+      up(2,index) = 2 * shu[2][tk][tj][ti] - um(2,index) + fact * (cof * r3 + fo(2,index));
+    }
+    else {
+
+      float_sw4 dt2 = dt*dt;
+      float_sw4 dt4 = dt2*dt2;
+      float_sw4 fact = dt4 / (12 * __ldg(&a_rho[index]));
+      up(0,index) += fact * (cof * r1 + fo(0,index));
+      up(1,index) += fact * (cof * r2 + fo(1,index));
+      up(2,index) += fact * (cof * r3 + fo(2,index));
+    }
+  }
+}
+```
+optimizations list = [{'lines': ['81-186', '191-201', '203-221', '243-257', '281-301', '302-365', '371-395', '400-452', '454-468'], 'reason': 'Use __ldg() on read-only global arrays (a_lambda, a_mu, a_strx, a_stry, a_rho, dev_acof, dev_bope, dev_ghcof) to leverage Hopper read-only/L2 caching and reduce HBM traffic.'}, {'lines': ['233-241', '265-281', '288-301', '321-346', '348-365', '371-395', '401-445'], 'reason': 'Introduce shared-memory row pointers and cached scalars (strx_i, stry_j, strx_stry) to reduce repeated address calculations and shared-memory traffic, improving ILP and reducing bank conflicts.'}, {'lines': ['243-257', '248-253', '325-332', '340-345', '371-378', '387-393', '400-407', '418-425', '433-451'], 'reason': '#pragma unroll for fixed-trip loops (8 iterations) to increase ILP and better utilize H100 execution units.'}, {'lines': ['191-203', '454-468'], 'reason': 'Precompute dt^2, dt^4 and reuse cof; reduce divisions and redundant multiplications.'}] 
+suggested_but_not_applied list = [{'lines': ['all'], 'reason': 'cp.async asynchronous global-to-shared pipelines (double-buffering) for Hopper could further overlap memory and compute, but applying it would require restructuring the staged load sections and additional synchronization complexity while keeping the same shared-memory footprint and no helper utilities as constrained.'}, {'lines': ['all'], 'reason': 'Using Tensor Cores (WMMA/TF32/BF16) is not applicable because the kernel is stencil-like with no matrix multiply structure and must preserve numerical behavior of float_sw4.'}, {'lines': ['31-34', '81-186'], 'reason': 'Re-tiling shared-memory layout or enlarging tiles to improve L2 reuse is constrained by the requirement to not increase shared-memory footprint nor add new shared arrays.'}]

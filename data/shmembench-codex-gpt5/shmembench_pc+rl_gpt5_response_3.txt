@@ -1,0 +1,224 @@
+#include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
+#include <cmath>
+#include <chrono>
+
+#ifndef BLOCK_SIZE
+#define BLOCK_SIZE 256
+#endif
+
+#ifndef TOTAL_ITERATIONS
+#define TOTAL_ITERATIONS 1024
+#endif
+
+#define CUDA_CHECK(call)                                                        \
+  do {                                                                          \
+    cudaError_t err__ = (call);                                                 \
+    if (err__ != cudaSuccess) {                                                 \
+      std::fprintf(stderr, "CUDA error %s at %s:%d\n",                          \
+                   cudaGetErrorString(err__), __FILE__, __LINE__);              \
+      std::exit(EXIT_FAILURE);                                                  \
+    }                                                                           \
+  } while (0)
+
+__device__ __forceinline__ void shmem_swap(float4* __restrict__ v1,
+                                           float4* __restrict__ v2) {
+  float4 tmp = *v2;
+  *v2 = *v1;
+  *v1 = tmp;
+}
+
+__device__ __forceinline__ float4 init_val(int i) {
+  return make_float4((float)i, (float)(i + 11), (float)(i + 19), (float)(i + 23));
+}
+
+__device__ __forceinline__ float4 reduce_vector(const float4& v1, const float4& v2,
+                                                const float4& v3, const float4& v4,
+                                                const float4& v5, const float4& v6) {
+  return make_float4(v1.x + v2.x + v3.x + v4.x + v5.x + v6.x,
+                     v1.y + v2.y + v3.y + v4.y + v5.y + v6.y,
+                     v1.z + v2.z + v3.z + v4.z + v5.z + v6.z,
+                     v1.w + v2.w + v3.w + v4.w + v5.w + v6.w);
+}
+
+__device__ __forceinline__ void set_vector(float4* __restrict__ target, int offset, float4 v) {
+  target[offset] = v;
+}
+
+__global__ void benchmark_shmem(float4* __restrict__ g_data, int n_outputs) {
+  __shared__ float4 shm_buffer[BLOCK_SIZE * 6];
+
+  const int tid = threadIdx.x;
+  const int globaltid = blockIdx.x * blockDim.x + tid;
+
+  // Initialize per-thread 6x float4 segment in shared memory
+  set_vector(shm_buffer, tid + 0 * blockDim.x, init_val(tid));
+  set_vector(shm_buffer, tid + 1 * blockDim.x, init_val(tid + 1));
+  set_vector(shm_buffer, tid + 2 * blockDim.x, init_val(tid + 3));
+  set_vector(shm_buffer, tid + 3 * blockDim.x, init_val(tid + 7));
+  set_vector(shm_buffer, tid + 4 * blockDim.x, init_val(tid + 13));
+  set_vector(shm_buffer, tid + 5 * blockDim.x, init_val(tid + 17));
+
+  __syncthreads();
+
+  #pragma unroll 32
+  for (int j = 0; j < TOTAL_ITERATIONS; ++j) {
+    // 3 pairwise swaps
+    shmem_swap(shm_buffer + tid + 0 * blockDim.x, shm_buffer + tid + 1 * blockDim.x);
+    shmem_swap(shm_buffer + tid + 2 * blockDim.x, shm_buffer + tid + 3 * blockDim.x);
+    shmem_swap(shm_buffer + tid + 4 * blockDim.x, shm_buffer + tid + 5 * blockDim.x);
+
+    __syncthreads();
+
+    // 2 pairwise swaps
+    shmem_swap(shm_buffer + tid + 1 * blockDim.x, shm_buffer + tid + 2 * blockDim.x);
+    shmem_swap(shm_buffer + tid + 3 * blockDim.x, shm_buffer + tid + 4 * blockDim.x);
+
+    __syncthreads();
+  }
+
+  if (globaltid < n_outputs) {
+    g_data[globaltid] = reduce_vector(shm_buffer[tid + 0 * blockDim.x],
+                                      shm_buffer[tid + 1 * blockDim.x],
+                                      shm_buffer[tid + 2 * blockDim.x],
+                                      shm_buffer[tid + 3 * blockDim.x],
+                                      shm_buffer[tid + 4 * blockDim.x],
+                                      shm_buffer[tid + 5 * blockDim.x]);
+  }
+}
+
+static inline float4 host_init_val(int i) {
+  float4 v;
+  v.x = (float)i;
+  v.y = (float)(i + 11);
+  v.z = (float)(i + 19);
+  v.w = (float)(i + 23);
+  return v;
+}
+
+static inline float4 host_reduce_vector(const float4& v1, const float4& v2,
+                                        const float4& v3, const float4& v4,
+                                        const float4& v5, const float4& v6) {
+  float4 r;
+  r.x = v1.x + v2.x + v3.x + v4.x + v5.x + v6.x;
+  r.y = v1.y + v2.y + v3.y + v4.y + v5.y + v6.y;
+  r.z = v1.z + v2.z + v3.z + v4.z + v5.z + v6.z;
+  r.w = v1.w + v2.w + v3.w + v4.w + v5.w + v6.w;
+  return r;
+}
+
+static inline double expected_checksum_scalar(long long n_outputs) {
+  // The swap sequence only permutes values; per-thread reduce is invariant.
+  long double s = 0.0L;
+  for (long long tid = 0; tid < n_outputs; ++tid) {
+    float4 r = host_reduce_vector(
+        host_init_val((int)tid),
+        host_init_val((int)(tid + 1)),
+        host_init_val((int)(tid + 3)),
+        host_init_val((int)(tid + 7)),
+        host_init_val((int)(tid + 13)),
+        host_init_val((int)(tid + 17)));
+    s += (long double)r.x + (long double)r.y + (long double)r.z + (long double)r.w;
+  }
+  return (double)s;
+}
+
+// Optimized GPU benchmark entry point expected by external harness.
+void shmembenchGPU(double* c, const long size, const int repeat) {
+  using namespace std::chrono;
+
+  if (size <= 0 || repeat <= 0) {
+    std::fprintf(stderr, "shmembenchGPU: invalid arguments (size=%ld, repeat=%d)\n", size, repeat);
+    return;
+  }
+
+  if (BLOCK_SIZE <= 0 || (BLOCK_SIZE % 32) != 0) {
+    std::fprintf(stderr, "BLOCK_SIZE must be a positive multiple of 32 (got %d)\n", BLOCK_SIZE);
+    return;
+  }
+
+  const long long n_outputs = (long long)size; // Interpret 'size' as number of float4 outputs
+  const int threads_per_block = BLOCK_SIZE;
+  const int blocks = (int)((n_outputs + threads_per_block - 1) / threads_per_block);
+  const long long total_threads = (long long)blocks * threads_per_block;
+
+  float4* d_out = nullptr;
+  CUDA_CHECK(cudaMalloc((void**)&d_out, total_threads * sizeof(float4)));
+
+  // Warm-up
+  benchmark_shmem<<<blocks, threads_per_block>>>(d_out, (int)n_outputs);
+  CUDA_CHECK(cudaPeekAtLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+  // Time with CUDA events
+  cudaEvent_t start, stop;
+  CUDA_CHECK(cudaEventCreate(&start));
+  CUDA_CHECK(cudaEventCreate(&stop));
+  CUDA_CHECK(cudaEventRecord(start));
+  for (int i = 0; i < repeat; ++i) {
+    benchmark_shmem<<<blocks, threads_per_block>>>(d_out, (int)n_outputs);
+  }
+  CUDA_CHECK(cudaEventRecord(stop));
+  CUDA_CHECK(cudaEventSynchronize(stop));
+
+  float elapsed_ms_total = 0.0f;
+  CUDA_CHECK(cudaEventElapsedTime(&elapsed_ms_total, start, stop));
+  const double avg_ms = (double)elapsed_ms_total / (double)repeat;
+
+  CUDA_CHECK(cudaEventDestroy(start));
+  CUDA_CHECK(cudaEventDestroy(stop));
+
+  // Copy back only the valid n_outputs
+  std::vector<float4> h_out((size_t)n_outputs);
+  CUDA_CHECK(cudaMemcpy(h_out.data(), d_out, n_outputs * sizeof(float4), cudaMemcpyDeviceToHost));
+  CUDA_CHECK(cudaFree(d_out));
+
+  // If the caller provided a buffer, populate it with per-thread scalar reductions
+  // so that summing c[0..size-1] equals the checksum we compute below.
+  if (c != nullptr) {
+    for (long long i = 0; i < n_outputs; ++i) {
+      c[i] = (double)h_out[(size_t)i].x
+           + (double)h_out[(size_t)i].y
+           + (double)h_out[(size_t)i].z
+           + (double)h_out[(size_t)i].w;
+    }
+  }
+
+  // Compute checksum (scalar: sum of all components of all outputs)
+  double sum_host = 0.0;
+  for (long long i = 0; i < n_outputs; ++i) {
+    sum_host += (double)h_out[(size_t)i].x
+              + (double)h_out[(size_t)i].y
+              + (double)h_out[(size_t)i].z
+              + (double)h_out[(size_t)i].w;
+  }
+  const double sum_expected = expected_checksum_scalar(n_outputs);
+  const double abs_err = std::fabs(sum_host - sum_expected);
+
+  if (abs_err > 1e-2) {
+    std::printf("Checksum failed. Abs error = %.6e\n", abs_err);
+  } else {
+    std::printf("Checksum OK. Abs error = %.6e\n", abs_err);
+  }
+
+  // Shared memory throughput estimation
+  // Per-thread 32-bit shared-memory ops accounting:
+  //   - 6 stores (initialization)
+  //   - For each iteration: 5 swaps; each swap of a float4 entails 2 x 128-bit accesses
+  //     for read+write of each of the two locations; that's 4 x 128-bit = 16 x 32-bit ops
+  //     per swap. Hence 5 * 16 = 80 x 32-bit ops per iteration.
+  //   - 6 loads (final reduction)
+  const long long ops_32bit_per_thread = (6LL + 4LL * 5LL * TOTAL_ITERATIONS + 6LL);
+  const long long ops_32bit_total = ops_32bit_per_thread * n_outputs;
+  const long long bytes_total = ops_32bit_total * sizeof(float);
+  const double seconds = avg_ms * 1e-3;
+  const double gb_per_s = (double)bytes_total / seconds / 1e9;
+  const double ops_128bit_per_s = ((double)ops_32bit_total / 4.0) / seconds / 1e9;
+
+  std::printf("Average kernel execution time : %f (ms)\n", avg_ms);
+  std::printf("Memory throughput\n");
+  std::printf("\tusing 128bit operations : %8.2f GB/sec (%6.2f billion accesses/sec)\n",
+              gb_per_s, ops_128bit_per_s);
+}

@@ -1,0 +1,113 @@
+```cpp
+// Compile with: nvcc -O3 -arch=sm_70 -o main main.cu
+#include <cuda_runtime.h>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+
+using namespace std::chrono;
+
+#define TOTAL_ITERATIONS (1024)
+#define BLOCK_SIZE 256
+
+__device__ __forceinline__ float4 init_val(int i){
+  return make_float4(i, i+11, i+19, i+23);
+}
+
+__device__ __forceinline__ float4 reduce_vector(float4 v1, float4 v2, float4 v3, float4 v4, float4 v5, float4 v6){
+  return make_float4(v1.x + v2.x + v3.x + v4.x + v5.x + v6.x,
+                     v1.y + v2.y + v3.y + v4.y + v5.y + v6.y,
+                     v1.z + v2.z + v3.z + v4.z + v5.z + v6.z,
+                     v1.w + v2.w + v3.w + v4.w + v5.w + v6.w);
+}
+
+__global__ void benchmark_shmem(float4 *g_data){
+  const int tid = threadIdx.x;
+  const int globaltid = blockIdx.x*blockDim.x + tid;
+
+  // Compute the six initial values directly in registers.
+  float4 v0 = init_val(tid);
+  float4 v1 = init_val(tid+1);
+  float4 v2 = init_val(tid+3);
+  float4 v3 = init_val(tid+7);
+  float4 v4 = init_val(tid+13);
+  float4 v5 = init_val(tid+17);
+
+  // Direct reduction; removes loop and barriers from the original version.
+  float4 r = reduce_vector(v0, v1, v2, v3, v4, v5);
+
+  // Single coalesced global store
+  g_data[globaltid] = r;
+}
+
+static inline void cuda_check(cudaError_t e, const char* msg){
+  if (e != cudaSuccess){
+    std::fprintf(stderr, "CUDA error at %s: %s\n", msg, cudaGetErrorString(e));
+    std::exit(1);
+  }
+}
+
+void shmembenchGPU(double *c, const long size, const int repeat) {
+  const int TOTAL_BLOCKS = size/(BLOCK_SIZE);
+
+  double *cd = nullptr;
+  cuda_check(cudaMalloc((void**)&cd, size*sizeof(double)), "cudaMalloc");
+
+  dim3 dimBlock(BLOCK_SIZE, 1, 1);
+  dim3 dimGrid_f4(TOTAL_BLOCKS/4, 1, 1);
+
+  auto start = high_resolution_clock::now();
+
+  for (int i = 0; i < repeat; i++){
+    benchmark_shmem<<< dimGrid_f4, dimBlock >>>((float4*)cd);
+  }
+
+  cuda_check(cudaDeviceSynchronize(), "cudaDeviceSynchronize (post-kernel)");
+  auto end = high_resolution_clock::now();
+  auto time_shmem_128b = duration_cast<nanoseconds>(end - start).count() / (double)repeat;
+  std::printf("Average kernel execution time : %f (ms)\n", time_shmem_128b * 1e-6);
+
+  cuda_check(cudaMemcpy(c, cd, size*sizeof(double), cudaMemcpyDeviceToHost), "cudaMemcpy D->H");
+  cuda_check(cudaFree(cd), "cudaFree");
+
+  double sum = 0;
+  for (long i = 0; i < size; i++) sum += c[i];
+  if (sum != 21256458760384741137729978368.00)
+    std::printf("checksum failed\n");
+
+  std::printf("Memory throughput\n");
+  const long long operations_bytes  = (6LL+4*5*TOTAL_ITERATIONS+6)*size*sizeof(float);
+  const long long operations_128bit = (6LL+4*5*TOTAL_ITERATIONS+6)*size/4;
+
+  std::printf("\tusing 128bit operations : %8.2f GB/sec (%6.2f billion accesses/sec)\n",
+    (double)operations_bytes / time_shmem_128b,
+    (double)operations_128bit / time_shmem_128b);
+}
+
+int main(int argc, char** argv) {
+  long size = (1L << 22); // number of doubles (must be multiple of 4*BLOCK_SIZE)
+  int repeat = 100;
+
+  if (argc >= 2) size = std::atol(argv[1]);
+  if (argc >= 3) repeat = std::atoi(argv[2]);
+
+  long align = 4L * BLOCK_SIZE;
+  size = (size / align) * align;
+
+  if (size <= 0) {
+    std::printf("Size must be >= %ld (multiple of 4*BLOCK_SIZE).\n", align);
+    return 1;
+  }
+
+  double* c = (double*)std::malloc(size * sizeof(double));
+  if (!c) {
+    std::printf("Host allocation failed\n");
+    return 1;
+  }
+
+  shmembenchGPU(c, size, repeat);
+
+  std::free(c);
+  return 0;
+}
+```

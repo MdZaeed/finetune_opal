@@ -1,0 +1,464 @@
+After requesting for optimized code from you, I have gotten the following code:
+# Begin optimized Code
+```cpp```
+#include <cuda.h>
+#include <cuda_runtime.h>
+
+#ifndef float_sw4
+// Match performance analysis which shows double_*
+typedef double float_sw4;
+#endif
+
+// Kernel must keep the same signature and name.
+// Note: BX and BY are assumed to be defined by the build configuration.
+__global__ void addsgd4_SM (int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+                         int ni, int nj, int nk,
+                         float_sw4* __restrict__ a_up,
+                         const float_sw4* __restrict__ a_u,
+                         const float_sw4* __restrict__ a_um,
+                         const float_sw4* __restrict__ a_rho,
+                         const float_sw4* __restrict__ a_dcx,
+                         const float_sw4* __restrict__ a_dcy,
+                         const float_sw4* __restrict__ a_dcz,
+                         const float_sw4* __restrict__ a_strx,
+                         const float_sw4* __restrict__ a_stry,
+                         const float_sw4* __restrict__ a_strz,
+                         const float_sw4* __restrict__ a_cox,
+                         const float_sw4* __restrict__ a_coy,
+                         const float_sw4* __restrict__ a_coz,
+                         const float_sw4 beta) {
+  // Indexing helpers (SoA layout: [component][nijk] + idx)
+  // These macros capture nijk from the current scope.
+  #define u(c, IDX)   a_u[(c)*(nijk) + (IDX)]
+  #define um(c, IDX)  a_um[(c)*(nijk) + (IDX)]
+  #define up(c, IDX)  a_up[(c)*(nijk) + (IDX)]
+
+  int index;
+  float_sw4 u_km2[3], u_km1[3];
+
+  // Expand shared memory tiles to hold 2x in each lateral dimension plus halo to avoid OOB
+  __shared__ float_sw4 shu[3][3][2*BY+4][2*BX+4];
+
+  const int i = threadIdx.x + blockIdx.x * BX;
+  const int j = jfirst + threadIdx.y + blockIdx.y * BY;
+
+  const int ti = threadIdx.x + 2;
+  const int tj = threadIdx.y + 2;
+
+  const int nij = ni * nj;
+  const int nijk = nij * nk;
+
+  int active=0, loader=0, loady2=0, loaderx2=0;
+
+  if (i+2 >= ifirst && i+2 <= ilast && j <= jlast)
+    active = 1;
+
+  if (i < ni && j-2 <= jlast+2) {
+    loader = 1;
+    if (threadIdx.x < 4 && i+BX < ni)
+      loaderx2 = 1;
+    if (threadIdx.y < 4 && j-2+BY <= jlast+2)
+      loady2 = 1;
+  }
+
+  // Preload k-2 and k-1 ring differentials into registers
+  if (active) {
+    int idxkm2 = (kfirst - 2) * nij + j * ni + i + 2;
+    #pragma unroll 3
+    for (int c=0; c<3; c++) {
+      float_sw4 u0 = __ldg(&u(c,idxkm2));
+      float_sw4 um0 = __ldg(&um(c,idxkm2));
+      u_km2[c] = u0 - um0;
+    }
+    int idxkm1 = idxkm2 + nij;
+    #pragma unroll 3
+    for (int c=0; c<3; c++) {
+      float_sw4 u0 = __ldg(&u(c,idxkm1));
+      float_sw4 um0 = __ldg(&um(c,idxkm1));
+      u_km1[c] = u0 - um0;
+    }
+  }
+
+  index = kfirst * nij + (j - 2) * ni + i;
+
+  // Stage two k-planes into shared memory (s=1,2 used; s=0 will carry the rolling buffer)
+  #pragma unroll 3
+  for (int c=0; c<3; c++) {
+    if (loader) {
+      int idx0 = index;
+      float_sw4 u10 = __ldg(&u(c,idx0));
+      float_sw4 um10 = __ldg(&um(c,idx0));
+      float_sw4 u11 = __ldg(&u(c,idx0+nij));
+      float_sw4 um11 = __ldg(&um(c,idx0+nij));
+      shu[c][1][threadIdx.y][threadIdx.x]      = u10 - um10;
+      shu[c][2][threadIdx.y][threadIdx.x]      = u11 - um11;
+    }
+    if (loaderx2) {
+      int idxx = index + BX;
+      float_sw4 u20 = __ldg(&u(c,idxx));
+      float_sw4 um20 = __ldg(&um(c,idxx));
+      float_sw4 u21 = __ldg(&u(c,idxx+nij));
+      float_sw4 um21 = __ldg(&um(c,idxx+nij));
+      shu[c][1][threadIdx.y][threadIdx.x+BX]   = u20 - um20;
+      shu[c][2][threadIdx.y][threadIdx.x+BX]   = u21 - um21;
+    }
+    if (loady2) {
+      int idxy = index + BY * ni;
+      float_sw4 u30 = __ldg(&u(c,idxy));
+      float_sw4 um30 = __ldg(&um(c,idxy));
+      float_sw4 u31 = __ldg(&u(c,idxy+nij));
+      float_sw4 um31 = __ldg(&um(c,idxy+nij));
+      shu[c][1][threadIdx.y+BY][threadIdx.x]   = u30 - um30;
+      shu[c][2][threadIdx.y+BY][threadIdx.x]   = u31 - um31;
+    }
+    if (loady2 && loaderx2) {
+      int idxyx = index + BY * ni + BX;
+      float_sw4 u40 = __ldg(&u(c,idxyx));
+      float_sw4 um40 = __ldg(&um(c,idxyx));
+      float_sw4 u41 = __ldg(&u(c,idxyx+nij));
+      float_sw4 um41 = __ldg(&um(c,idxyx+nij));
+      shu[c][1][threadIdx.y+BY][threadIdx.x+BX]= u40 - um40;
+      shu[c][2][threadIdx.y+BY][threadIdx.x+BX]= u41 - um41;
+    }
+  }
+
+  index += 2 * nij;
+
+  for (int k=kfirst; k <= klast; k++) {
+    __syncthreads();
+
+    // Roll the shared memory ring buffer along k and load the next plane
+    #pragma unroll 3
+    for (int c=0; c<3; c++) {
+      if (loader) {
+        #pragma unroll 2
+        for (int s=0; s<2; s++)
+          shu[c][s][threadIdx.y][threadIdx.x] = shu[c][s+1][threadIdx.y][threadIdx.x];
+        int idx0 = index;
+        float_sw4 u0 = __ldg(&u(c,idx0));
+        float_sw4 um0 = __ldg(&um(c,idx0));
+        shu[c][2][threadIdx.y][threadIdx.x] = u0 - um0;
+      }
+      if (loaderx2) {
+        #pragma unroll 2
+        for (int s=0; s<2; s++)
+          shu[c][s][threadIdx.y][threadIdx.x+BX] = shu[c][s+1][threadIdx.y][threadIdx.x+BX];
+        int idx1 = index + BX;
+        float_sw4 u1 = __ldg(&u(c,idx1));
+        float_sw4 um1 = __ldg(&um(c,idx1));
+        shu[c][2][threadIdx.y][threadIdx.x+BX] = u1 - um1;
+      }
+      if (loady2) {
+        #pragma unroll 2
+        for (int s=0; s<2; s++)
+          shu[c][s][threadIdx.y+BY][threadIdx.x] = shu[c][s+1][threadIdx.y+BY][threadIdx.x];
+        int idx2 = index + BY * ni;
+        float_sw4 u2 = __ldg(&u(c,idx2));
+        float_sw4 um2 = __ldg(&um(c,idx2));
+        shu[c][2][threadIdx.y+BY][threadIdx.x] = u2 - um2;
+      }
+      if (loady2 && loaderx2) {
+        #pragma unroll 2
+        for (int s=0; s<2; s++)
+          shu[c][s][threadIdx.y+BY][threadIdx.x+BX] = shu[c][s+1][threadIdx.y+BY][threadIdx.x+BX];
+        int idx3 = index + BY * ni + BX;
+        float_sw4 u3 = __ldg(&u(c,idx3));
+        float_sw4 um3 = __ldg(&um(c,idx3));
+        shu[c][2][threadIdx.y+BY][threadIdx.x+BX] = u3 - um3;
+      }
+    }
+
+    index += nij;
+    __syncthreads();
+
+    if (active) {
+      const int idx = k * nij + j * ni + i + 2;
+
+      // Hoist frequently reused coefficients and neighbor rho values to registers
+      const float_sw4 rho_c   = __ldg(&a_rho[idx]);
+      const float_sw4 rho_ip1 = __ldg(&a_rho[idx+1]);
+      const float_sw4 rho_im1 = __ldg(&a_rho[idx-1]);
+      const float_sw4 rho_jp1 = __ldg(&a_rho[idx+ni]);
+      const float_sw4 rho_jm1 = __ldg(&a_rho[idx-ni]);
+      const float_sw4 rho_kp1 = __ldg(&a_rho[idx+nij]);
+      const float_sw4 rho_km1 = __ldg(&a_rho[idx-nij]);
+
+      const float_sw4 birho = beta / rho_c;
+
+      // Metric/derivative coefficients
+      const float_sw4 strx_i2 = __ldg(&a_strx[i+2]);
+      const float_sw4 stry_j  = __ldg(&a_stry[j]);
+      const float_sw4 strz_k  = __ldg(&a_strz[k]);
+
+      const float_sw4 cox_i2  = __ldg(&a_cox[i+2]);
+      const float_sw4 coy_j   = __ldg(&a_coy[j]);
+      const float_sw4 coz_k   = __ldg(&a_coz[k]);
+
+      const float_sw4 dcx_i1  = __ldg(&a_dcx[i+1]);
+      const float_sw4 dcx_i2  = __ldg(&a_dcx[i+2]);
+      const float_sw4 dcx_i3  = __ldg(&a_dcx[i+3]);
+
+      const float_sw4 dcy_jm1 = __ldg(&a_dcy[j-1]);
+      const float_sw4 dcy_j   = __ldg(&a_dcy[j]);
+      const float_sw4 dcy_jp1 = __ldg(&a_dcy[j+1]);
+
+      const float_sw4 dcz_km1 = __ldg(&a_dcz[k-1]);
+      const float_sw4 dcz_k   = __ldg(&a_dcz[k]);
+      const float_sw4 dcz_kp1 = __ldg(&a_dcz[k+1]);
+
+      // Precompute directional prefactors
+      const float_sw4 pref_x = strx_i2 * coy_j * coz_k;
+      const float_sw4 pref_y = stry_j  * cox_i2 * coz_k;
+      const float_sw4 pref_z = strz_k  * cox_i2 * coy_j;
+
+      // Unroll component loop for ILP and reduced loop overhead
+      #pragma unroll 3
+      for (int c=0; c<3; c++) {
+        // Fetch shared tile neighborhood for this component
+        const float_sw4 s_c_ti_m2 = shu[c][0][tj][ti-2];
+        const float_sw4 s_c_ti_m1 = shu[c][0][tj][ti-1];
+        const float_sw4 s_c_ti_0  = shu[c][0][tj][ti  ];
+        const float_sw4 s_c_ti_p1 = shu[c][0][tj][ti+1];
+        const float_sw4 s_c_ti_p2 = shu[c][0][tj][ti+2];
+
+        const float_sw4 s_c_tj_m2 = shu[c][0][tj-2][ti];
+        const float_sw4 s_c_tj_m1 = shu[c][0][tj-1][ti];
+        const float_sw4 s_c_tj_0  = shu[c][0][tj  ][ti];
+        const float_sw4 s_c_tj_p1 = shu[c][0][tj+1][ti];
+        const float_sw4 s_c_tj_p2 = shu[c][0][tj+2][ti];
+
+        const float_sw4 s_c_km1   = u_km1[c];
+        const float_sw4 s_c_km2   = u_km2[c];
+        const float_sw4 s_c_k0    = shu[c][0][tj][ti];
+        const float_sw4 s_c_k1    = shu[c][1][tj][ti];
+        const float_sw4 s_c_k2    = shu[c][2][tj][ti];
+
+        // Discrete operators in x, y, z directions
+        const float_sw4 lapx =
+          rho_ip1 * dcx_i3 * (s_c_ti_p2 - 2.0 * s_c_ti_p1 + s_c_ti_0) -
+          2.0    * rho_c   * dcx_i2 * (s_c_ti_p1 - 2.0 * s_c_ti_0  + s_c_ti_m1) +
+          rho_im1 * dcx_i1 * (s_c_ti_0 - 2.0 * s_c_ti_m1 + s_c_ti_m2);
+
+        const float_sw4 lapy =
+          rho_jp1 * dcy_jp1 * (s_c_tj_p2 - 2.0 * s_c_tj_p1 + s_c_tj_0) -
+          2.0    * rho_c   * dcy_j   * (s_c_tj_p1 - 2.0 * s_c_tj_0  + s_c_tj_m1) +
+          rho_jm1 * dcy_jm1 * (s_c_tj_0 - 2.0 * s_c_tj_m1 + s_c_tj_m2);
+
+        const float_sw4 lapz =
+          rho_kp1 * dcz_kp1 * (s_c_k2 - 2.0 * s_c_k1 + s_c_k0) -
+          2.0    * rho_c   * dcz_k   * (s_c_k1 - 2.0 * s_c_k0 + s_c_km1) +
+          rho_km1 * dcz_km1 * (s_c_k0 - 2.0 * s_c_km1 + s_c_km2);
+
+        up(c,idx) -= birho * (pref_x * lapx + pref_y * lapy + pref_z * lapz);
+
+        // Rotate z-history registers
+        u_km2[c] = s_c_km1;
+        u_km1[c] = s_c_k0;
+      }
+    }
+  }
+
+  #undef u
+  #undef um
+  #undef up
+}
+```cpp```
+# End optimized Code
+While building we get the following build errors: /storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(10147): error: identifier "ro" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(10175): error: identifier "ro" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13029): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13029): error: identifier "um" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13031): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13031): error: identifier "um" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13036): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13036): error: identifier "um" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13038): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13038): error: identifier "um" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13043): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13043): error: identifier "um" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13045): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13045): error: identifier "um" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13050): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13050): error: identifier "um" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13052): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13052): error: identifier "um" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13081): error: identifier "up" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13246): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13246): error: identifier "um" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13260): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13260): error: identifier "um" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13274): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13274): error: identifier "um" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13288): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13288): error: identifier "um" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13327): error: identifier "up" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13422): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13428): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13434): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13440): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13446): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13452): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13468): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13475): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13482): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13489): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13496): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13503): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13527): error: identifier "u" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(13552): error: identifier "u" is undefined
+make[2]: *** [CMakeFiles/sw4lite.dir/build.make:245: CMakeFiles/sw4lite.dir/src/device-routines.C.o] Error 2
+make[1]: *** [CMakeFiles/Makefile2:87: CMakeFiles/sw4lite.dir/all] Error 2
+make: *** [Makefile:91: all] Error 2
+
+Below is added the original source code.
+# Begin Source Code
+```cpp```
+1: __global__ void addsgd4_SM (int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+2:                          int ni, int nj, int nk,
+3:                          float_sw4* __restrict__ a_up,
+4:                          const float_sw4* __restrict__ a_u,
+5:                          const float_sw4* __restrict__ a_um,
+6:                          const float_sw4* __restrict__ a_rho,
+7:                          const float_sw4* __restrict__ a_dcx,
+8:                          const float_sw4* __restrict__ a_dcy,
+9:                          const float_sw4* __restrict__ a_dcz,
+10:                          const float_sw4* __restrict__ a_strx,
+11:                          const float_sw4* __restrict__ a_stry,
+12:                          const float_sw4* __restrict__ a_strz,
+13:                          const float_sw4* __restrict__ a_cox,
+14:                          const float_sw4* __restrict__ a_coy,
+15:                          const float_sw4* __restrict__ a_coz,
+16:                          const float_sw4 beta) {
+17:   int index;
+18:   float_sw4 u_km2[3], u_km1[3], old_up[3];
+19:
+20:   __shared__ float_sw4 shu[3][3][BY+4][BX+4];
+21:
+22:   const int i = threadIdx.x + blockIdx.x * BX;
+23:
+24:   const int j = jfirst + threadIdx.y + blockIdx.y * BY;
+25:
+26:   const int ti = threadIdx.x + 2;
+27:   const int tj = threadIdx.y + 2;
+28:
+29:   const int nij = ni * nj;
+30:   const int nijk = nij * nk;
+31:
+32:   int active=0, loader=0, loady2=0, loaderx2=0;
+33:
+34:   if (i+2 >= ifirst && i+2 <= ilast && j <= jlast)
+35:     active = 1;
+36:
+37:   if (i < ni && j-2 <= jlast+2) {
+38:     loader = 1;
+39:     if (threadIdx.x < 4 && i+BX < ni)
+40:       loaderx2 = 1;
+41:     if (threadIdx.y < 4 && j-2+BY <= jlast+2)
+42:       loady2 = 1;
+43:   }
+44:
+45:   if (active) {
+46:
+47:     int idx = (kfirst - 2) * nij + j * ni + i + 2;
+48:     for (int c=0; c<3; c++)
+49:       u_km2[c] = u(c,idx) - um(c,idx);
+50:     idx += nij;
+51:     for (int c=0; c<3; c++)
+52:       u_km1[c] = u(c,idx) - um(c,idx);
+53:   }
+54:
+55:   index = kfirst * nij + (j - 2) * ni + i;
+56:
+57:   for (int c=0; c<3; c++) {
+58:     if (loader) {
+59:       int idx = index;
+60:       shu[c][1][threadIdx.y][threadIdx.x] = u(c,idx) - um(c,idx);
+61:       shu[c][2][threadIdx.y][threadIdx.x] = u(c,idx+nij) - um(c,idx+nij);
+62:     }
+63:     if (loaderx2) {
+64:       int idx = index + BX;
+65:       shu[c][1][threadIdx.y][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+66:       shu[c][2][threadIdx.y][threadIdx.x+BX] = u(c,idx+nij) - um(c,idx+nij);
+67:     }
+68:     if (loady2) {
+69:       int idx = index + BY * ni;
+70:       shu[c][1][threadIdx.y+BY][threadIdx.x] = u(c,idx) - um(c,idx);
+71:       shu[c][2][threadIdx.y+BY][threadIdx.x] = u(c,idx+nij) - um(c,idx+nij);
+72:     }
+73:     if (loady2 && loaderx2) {
+74:       int idx = index + BY * ni + BX;
+75:       shu[c][1][threadIdx.y+BY][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+76:       shu[c][2][threadIdx.y+BY][threadIdx.x+BX] = u(c,idx+nij) - um(c,idx+nij);
+77:     }
+78:   }
+79:
+80:   index += 2 * nij;
+81:
+82:   for (int k=kfirst; k <= klast; k++) {
+83:     __syncthreads();
+84:
+85:     for (int c=0; c<3; c++) {
+86:       if (loader) {
+87:         for (int s=0; s<2; s++)
+88:           shu[c][s][threadIdx.y][threadIdx.x] = shu[c][s+1][threadIdx.y][threadIdx.x];
+89:         int idx = index;
+90:         shu[c][2][threadIdx.y][threadIdx.x] = u(c,idx) - um(c,idx);
+91:       }
+92:       if (loaderx2) {
+93:         for (int s=0; s<2; s++)
+94:           shu[c][s][threadIdx.y][threadIdx.x+BX] = shu[c][s+1][threadIdx.y][threadIdx.x+BX];
+95:         int idx = index + BX;
+96:         shu[c][2][threadIdx.y][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+97:       }
+98:       if (loady2) {
+99:         for (int s=0; s<2; s++)
+100:           shu[c][s][threadIdx.y+BY][threadIdx.x] = shu[c][s+1][threadIdx.y+BY][threadIdx.x];
+101:         int idx = index + BY * ni;
+102:         shu[c][2][threadIdx.y+BY][threadIdx.x] = u(c,idx) - um(c,idx);
+103:       }
+104:       if (loady2 && loaderx2) {
+105:         for (int s=0; s<2; s++)
+106:           shu[c][s][threadIdx.y+BY][threadIdx.x+BX] = shu[c][s+1][threadIdx.y+BY][threadIdx.x+BX];
+107:         int idx = index + BY * ni + BX;
+108:         shu[c][2][threadIdx.y+BY][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+109:       }
+110:     }
+111:
+112:     index += nij;
+113:     __syncthreads();
+114:
+115:     if (active) {
+116:       int idx = k * nij + j * ni + i + 2;
+117:       float_sw4 birho=beta/a_rho[idx];
+118:
+119:       for (int c=0; c<3; c++) {
+120:         up(c,idx) -= birho *
+121:           (
+122:            a_strx[i+2] * a_coy[j] * a_coz[k] * (a_rho[idx+1] * a_dcx[i+3] * (shu[c][0][tj][ti+2] - 2 * shu[c][0][tj][ti+1] + shu[c][0][tj][ti  ]) -
+123:                                      2 * a_rho[idx] * a_dcx[i+2] * (shu[c][0][tj][ti+1] - 2 * shu[c][0][tj][ti  ] + shu[c][0][tj][ti-1]) +
+124:                                      a_rho[idx-1] * a_dcx[i+1] * (shu[c][0][tj][ti  ] - 2 * shu[c][0][tj][ti-1] + shu[c][0][tj][ti-2])) +
+125:
+126:            a_stry[j] * a_cox[i+2] * a_coz[k] * (a_rho[idx+ni] * a_dcy[j+1] * (shu[c][0][tj+2][ti] - 2 * shu[c][0][tj+1][ti] + shu[c][0][tj  ][ti]) -
+127:                                      2 * a_rho[idx] * a_dcy[j] * (shu[c][0][tj+1][ti] - 2 * shu[c][0][tj  ][ti] + shu[c][0][tj-1][ti]) +
+128:                                      a_rho[idx-ni] * a_dcy[j-1] * (shu[c][0][tj  ][ti] - 2 * shu[c][0][tj-1][ti] + shu[c][0][tj-2][ti])) +
+129:
+130:            a_strz[k] * a_cox[i+2] * a_coy[j] * (a_rho[idx+nij] * a_dcz[k+1] * (shu[c][2][tj][ti] - 2 * shu[c][1][tj][ti] + shu[c][0][tj][ti]) -
+131:                                      2 * a_rho[idx] * a_dcz[k] * (shu[c][1][tj][ti] - 2 * shu[c][0][tj][ti] + u_km1[c]         ) +
+132:                                      a_rho[idx-nij] * a_dcz[k-1] * (shu[c][0][tj][ti] - 2 * u_km1[c]          + u_km2[c])));
+133:
+134:         u_km2[c] = u_km1[c];
+135:         u_km1[c] = shu[c][0][tj][ti];
+136:       }
+137:     }
+138:
+139:   }
+140: }
+```cpp```
+# End Source Code
+# Instructions
+Can you give me the fixed optimized code that will replace the full source code including headers and main function body?
+Return exactly one fenced code block containing only compilable source code, then the two structured lists.
+Preserve the original entry-point structure exactly: do not add, duplicate, rename, or remove main().
+Do not add helper executables, wrapper mains, or alternate standalone programs.
+Do not change externally referenced function names or break linkage between declarations and definitions.
+Do not use cuda::pipeline, cuda::barrier, cuda::std::pipeline, cuda::std::barrier, cuda::memcpy_async, cuda::std::memcpy_async, cp.async, or add <cuda/pipeline> / <cuda/barrier> headers.

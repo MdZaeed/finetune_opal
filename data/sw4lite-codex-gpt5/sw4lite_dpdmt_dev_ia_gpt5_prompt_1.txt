@@ -1,0 +1,53 @@
+# Begin Source Code
+```cpp```
+1: __global__ void dpdmt_dev( int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+2: 			  float_sw4* up, float_sw4* u, float_sw4* um,
+3: 			  float_sw4* u2, float_sw4 dt2i, int ghost_points )
+4: {
+5:
+6:    size_t myi = threadIdx.x + blockIdx.x * blockDim.x;
+7:    const size_t nthreads = static_cast<size_t> (gridDim.x) * (blockDim.x);
+8:    const size_t npts = static_cast<size_t>((ilast-ifirst+1))*(jlast-jfirst+1)*(klast-kfirst+1);
+9:
+10:    for (size_t i = myi; i < 3*npts; i += nthreads)
+11:       u2[i  ] = dt2i*(up[i  ]-2*u[i  ]+um[i  ]);
+12: }
+```cpp```
+# End Source Code
+
+
+# Begin H100 Optimization Guidance
+Optimize specifically for NVIDIA H100 (Hopper) by targeting L2/cache reuse, HBM3 bandwidth, and Tensor Core throughput. Prioritize tiling and data locality: make global accesses coalesced/contiguous, reuse data from registers/shared memory/L2, and reduce redundant global traffic. Use Hopper async pipelines to hide memory latency: stage global→shared with cp.async / cuda::memcpy_async using double/triple buffering so loads overlap compute; keep the pipeline full instead of blocking on loads. If compute is matrix/attention-like, map work to Tensor Cores (WMMA/CUTLASS/cuBLASLt) and use mixed precision (FP16/BF16/TF32, FP8 when numerically safe) to increase throughput. Tune launch configuration to avoid occupancy cliffs: pick block sizes that sustain high occupancy without excessive register pressure or shared-memory usage; avoid large per-thread local arrays that cause spills. Reduce warp inefficiency: minimize divergence, expensive atomics, and unnecessary __syncthreads(); prefer warp-level primitives and cooperative groups where applicable. If memory-bound, reduce passes and consider fusion/batching to increase L2 hit rate; if compute-bound, increase ILP, unroll judiciously, and favor FMA-friendly instruction patterns.
+# End H100 Optimization Guidance
+
+# Begin Entrypoint Guardrails
+Entrypoint guardrails:
+1. The source does not contain a main() definition. Do NOT introduce one.
+2. Do NOT add wrapper executables, test harnesses, helper mains, or alternate standalone programs.
+3. Keep the existing top-level program structure intact; only optimize within the existing file structure.
+4. Do NOT change externally referenced function names or break linkage between existing declarations and definitions.
+# End Entrypoint Guardrails
+# Instructions
+You must optimize the source code provided above using only the performance data provided above. 
+
+Optimize the following HPC code for execution time.
+Can you give me the fixed optimized code that will replace the full source code including headers and main function body?
+2. Do not add line numbers to the generated code. 
+3. Do not rename or duplicate any kernel or function.
+4. Do not change any function signatures.
+5. Preserve the existing entry-point structure exactly. If the file already has main(), keep exactly one equivalent main(); if it does not, do not add one.
+6. Do not add duplicate definitions for main or for any externally linked function.
+7. Do not turn declarations into disconnected definitions or break declaration/definition linkage.
+8. Keep all changes inside the existing kernel/function bodies whenever possible.
+9. Do NOT introduce any new helper functions, utility functions, macros, templates, classes, structs, global variables, or other new top-level symbols outside the existing kernels/functions.
+10. Do NOT add wrapper load helpers such as ro(), custom ldg wrappers, or any new reusable abstraction outside the existing kernel/function body.
+11. Do NOT increase the total shared-memory footprint of any kernel beyond the original source. Do not enlarge existing __shared__ arrays, do not add new shared-memory tiles, and prefer register/cache/read-only load optimizations over larger shared-memory staging.
+12. Use the performance analysis reference number(s) to guide your changes.
+13. Return:
+   (a) the full source code including the optimized kernels inside ``` block (starts with ``` and ends with ``` )
+   (b) optimizations list = [{'lines': [...], 'reason': '...'}]
+   (c) suggested_but_not_applied list = [{'lines': [...], 'reason': '...'}]
+14. Do not generate more than one copy of the same kernel.
+15. Do not invent any new kernels or placeholder code.
+
+ONLY respond with the updated code and two structured lists. No explanation, no notes, no markdown titles. Follow this format exactly.

@@ -1,0 +1,222 @@
+# Begin Source Code
+```cpp```
+1:
+34:
+35: #include "sobol.h"
+36: #include "sobol_gpu.h"
+37:
+38: #define k_2powneg32 2.3283064E-10F
+39:
+40: __global__
+41: void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+42:                      unsigned *__restrict__ d_directions,
+43:                      float *__restrict__ d_output)
+44: {
+45:
+46:
+47:     __shared__ unsigned int v[n_directions];
+48:
+49:
+50:
+51:     d_directions += n_directions * blockIdx.y;
+52:     d_output += n_vectors * blockIdx.y;
+53:
+54:
+55:
+56:
+57:     if (threadIdx.x < n_directions)
+58:     {
+59:         v[threadIdx.x] = d_directions[threadIdx.x];
+60:     }
+61:
+62:
+63:     __syncthreads();
+64:
+65:
+66:
+67:
+68:     int i0     = threadIdx.x + blockIdx.x * blockDim.x;
+69:     int stride = gridDim.x * blockDim.x;
+70:
+71:
+72:
+73:
+74:     unsigned int g = i0 ^ (i0 >> 1);
+75:
+76:
+77:
+78:
+79:
+80:     unsigned int X = 0;
+81:     unsigned int mask;
+82:
+83:     for (unsigned int k = 0 ; k < __ffs(stride) - 1 ; k++)
+84:     {
+85:
+86:
+87:
+88:
+89:         mask = - (g & 1);
+90:         X ^= mask & v[k];
+91:         g = g >> 1;
+92:     }
+93:
+94:     if (i0 < n_vectors)
+95:     {
+96:         d_output[i0] = (float)X * k_2powneg32;
+97:     }
+98:
+99:
+100:
+101:
+102:
+103:
+104:
+105:
+106:
+107:
+108:
+109:
+110:
+111:
+112:
+113:
+114:
+115:
+116:
+117:
+118:
+119:
+120:
+121:
+122:
+123:     unsigned int v_log2stridem1 = v[__ffs(stride) - 2];
+124:     unsigned int v_stridemask = stride - 1;
+125:
+126:     for (unsigned int i = i0 + stride ; i < n_vectors ; i += stride)
+127:     {
+128:
+129:
+130:
+131:
+132:
+133:
+134:         X ^= v_log2stridem1 ^ v[__ffs(~((i - stride) | v_stridemask)) - 1];
+135:         d_output[i] = (float)X * k_2powneg32;
+136:     }
+137: }
+138:
+139: double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+140:                 unsigned int *d_directions, float *d_output)
+141: {
+142:     const int threadsperblock = 64;
+143:
+144:
+145:     dim3 dimGrid;
+146:     dim3 dimBlock;
+147:
+148:
+149:
+150:
+151:
+152:
+153:
+154:     dimGrid.y = n_dimensions;
+155:
+156:
+157:
+158:
+159:
+160:     if (n_dimensions < (4 * 24))
+161:     {
+162:         dimGrid.x = 4 * 24;
+163:     }
+164:     else
+165:     {
+166:         dimGrid.x = 1;
+167:     }
+168:
+169:
+170:     if (dimGrid.x > (unsigned int)(n_vectors / threadsperblock))
+171:     {
+172:         dimGrid.x = (n_vectors + threadsperblock - 1) / threadsperblock;
+173:     }
+174:
+175:
+176:
+177:     unsigned int targetDimGridX = dimGrid.x;
+178:     for (dimGrid.x = 1 ; dimGrid.x < targetDimGridX ; dimGrid.x *= 2);
+179:
+180:
+181:     dimBlock.x = threadsperblock;
+182:
+183:     cudaDeviceSynchronize();
+184:     auto start = std::chrono::steady_clock::now();
+185:
+186:
+187:     for (int i = 0; i < repeat; i++)
+188:       sobolGPU_kernel <<<dimGrid, dimBlock>>> (
+189:         n_vectors, n_dimensions, d_directions, d_output);
+190:
+191:     cudaDeviceSynchronize();
+192:     auto end = std::chrono::steady_clock::now();
+193:     double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+194:     return time;
+195: }
+196:
+```cpp```
+# End Source Code
+# Begin Performance Analysis
+
+### STALL ANALYSIS:
+1. Line 297 has high stalls due to: stall_membar_ratio, stall_wait_ratio, stall_branch_resolving_ratio.
+2. Line 295 has high stalls due to: stall_wait_ratio, stall_short_sb_ratio.
+3. Line 294 has high stalls due to: stall_wait_ratio.
+4. Line 286 has high stalls due to: stall_wait_ratio.
+5. Line 284 has high stalls due to: stall_wait_ratio.
+6. Line 283 has high stalls due to: stall_branch_resolving_ratio, stall_wait_ratio, stall_long_sb_ratio, stall_short_sb_ratio.
+7. Line 256 has high stalls due to: stall_branch_resolving_ratio, stall_wait_ratio, stall_short_sb_ratio.
+8. Line 251 has high stalls due to: stall_wait_ratio, stall_math_ratio.
+9. Line 250 has high stalls due to: stall_wait_ratio, stall_short_sb_ratio.
+10. Line 249 has high stalls due to: stall_wait_ratio, stall_branch_resolving_ratio.
+11. Line 243 has high stalls due to: stall_wait_ratio.
+12. Line 240 has high stalls due to: stall_wait_ratio.
+13. Line 234 has high stalls due to: stall_wait_ratio.
+14. Line 229 has high stalls due to: stall_wait_ratio.
+15. Line 228 has high stalls due to: stall_barrier_ratio, stall_wait_ratio, stall_short_sb_ratio.
+16. Line 219 has high stalls due to: stall_wait_ratio, stall_long_sb_ratio, stall_short_sb_ratio.
+17. Line 217 has high stalls due to: stall_wait_ratio, stall_short_sb_ratio.
+18. Line 201 has high stalls due to: stall_imc_ratio, stall_wait_ratio, stall_no_inst_ratio, stall_short_sb_ratio.
+19. Line 212 has high stalls due to: stall_wait_ratio, stall_short_sb_ratio.
+20. Line 211 has high stalls due to: stall_wait_ratio, stall_short_sb_ratio.
+21. Line 223 has high stalls due to: stall_wait_ratio, stall_no_inst_ratio, stall_branch_resolving_ratio.
+22. Line 254 has high stalls due to: stall_wait_ratio, stall_branch_resolving_ratio.
+
+### ROOFLINE ANALYSIS:
+1. Kernel 'sobolGPU_kernel(unsigned int, unsigned int, unsigned int *, float *)': On average, each warp of this kernel spends 3.6 cycles being stalled waiting for a scoreboard dependency on a MIO (memory input/output) operation (not to L1TEX). The primary reason for a high number of stalls due to short scoreboards is typically memory operations to shared memory. Other reasons include frequent execution of special math instructions (e.g. MUFU) or dynamic branching (e.g. BRX, JMX). Consult the Memory Workload Analysis section to verify if there are shared memory operations and reduce bank conflicts, if reported. Assigning frequently accessed values to variables can assist the compiler in using low-latency registers instead of direct memory accesses. This stall type represents about 44.8% of the total average of 7.9 cycles between issuing two instructions.
+2. Kernel 'sobolGPU_kernel(unsigned int, unsigned int, unsigned int *, float *)': Every scheduler is capable of issuing one instruction per cycle, but for this kernel each scheduler only issues an instruction every 1.9 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this kernel allocates an average of 4.25 active warps per scheduler, but only an average of 0.82 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, reduce the time the active warps are stalled by inspecting the top stall reasons on the Warp State Statistics and Source Counters sections.
+3. Kernel 'sobolGPU_kernel(unsigned int, unsigned int, unsigned int *, float *)': The difference between calculated theoretical (100.0%) and measured achieved occupancy (25.6%) can be the result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on optimizing occupancy.
+4. Kernel 'sobolGPU_kernel(unsigned int, unsigned int, unsigned int *, float *)': This kernel executes 0 fused and 31250000 non-fused FP32 instructions. By converting pairs of non-fused instructions to their fused (https://docs.nvidia.com/cuda/floating-point/#cuda-and-floating-point), higher-throughput equivalent, the achieved FP32 performance could be increased by up to 50% (relative to its current performance). Check the Source page to identify where this kernel executes FP32 instructions.
+5. Kernel 'sobolGPU_kernel(unsigned int, unsigned int, unsigned int *, float *)': ALU is the highest-utilized pipeline (46.1%) based on active cycles, taking into account the rates of its different instructions. It executes integer and logic operations. It is well-utilized, but should not be a bottleneck.
+6. Kernel 'sobolGPU_kernel(unsigned int, unsigned int, unsigned int *, float *)': Check the Warp Stall Sampling (All Samples) table for the top stall locations in your source based on sampling data. The Kernel Profiling Guide (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-reference) provides more details on each stall reason.
+7. Kernel 'sobolGPU_kernel(unsigned int, unsigned int, unsigned int *, float *)': The ratio of peak float (fp32) to double (fp64) performance on this device is 2:1. The kernel achieved 1% of this device's fp32 peak performance and 0% of its fp64 peak performance. See the Kernel Profiling Guide (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#roofline) for more details on roofline analysis.
+8. Kernel 'sobolGPU_kernel(unsigned int, unsigned int, unsigned int *, float *)': The kernel is utilizing greater than 80.0% of the available compute or memory performance of the device. To further improve performance, work will likely need to be shifted from the most utilized to another unit. Start by analyzing DRAM in the Memory Workload Analysis section.
+9. Kernel 'sobolGPU_kernel(unsigned int, unsigned int, unsigned int *, float *)': Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the DRAM bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or whether there are values you can (re)compute.
+
+# End Performance Analysis
+# Instructions
+You must optimize the source code provided above using only the performance data provided above. 
+
+Can you give me the fixed optimized code that will replace the full source code including headers and main function body?
+2. Do not add line numbers to the generated code. 
+3. Do not rename or duplicate any kernel or function.
+4. Do not change any function signatures.
+5. Use the performance analysis reference number(s) to guide your changes.
+6. Return:
+   (a) the full source code including the optimized kernels inside ``` block (starts with ``` and ends with ``` )
+   (b) optimizations list = [{'lines': [...], 'reason': '...'}]
+   (c) suggested_but_not_applied list = [{'lines': [...], 'reason': '...'}]
+7. Do not generate more than one copy of the same kernel.
+8. Do not invent any new kernels or placeholder code.
+
+ONLY respond with the updated code and two structured lists. No explanation, no notes, no markdown titles. Follow this format exactly.

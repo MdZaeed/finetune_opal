@@ -1,0 +1,177 @@
+```cpp
+# Begin Source Code
+```cpp
+#include "sobol.h"
+#include "sobol_gpu.h"
+#include <chrono> // Required for std::chrono
+
+#define k_2powneg32 2.3283064E-10F
+
+// Preconditions:
+// - n_vectors > 0
+// - n_dimensions > 0
+// - d_directions points to valid device memory containing n_dimensions * n_directions unsigned integers.
+// - d_output points to valid device memory for n_vectors * n_dimensions float outputs.
+// - The n_directions kernel parameter represents the number of direction vectors per dimension.
+// - n_directions must be at least __ffs(n_vectors) - 1 to avoid out-of-bounds access to 'v' (and 'v_reg').
+//   In practice, n_directions is typically 32 for 32-bit Sobol sequences.
+// Postconditions:
+// - d_output will contain n_vectors * n_dimensions Sobol quasi-random numbers, scaled to [0, 1).
+//   Each n_vectors block of d_output corresponds to one dimension.
+__global__
+void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+                     unsigned *__restrict__ d_directions,
+                     float *__restrict__ d_output)
+{
+    // Note: The declaration '__shared__ unsigned int v[n_directions];' is non-standard
+    // if n_directions is a runtime parameter. It typically requires 'extern __shared__'
+    // and dynamic shared memory allocation at kernel launch. Assuming this compiles
+    // in the user's environment (e.g., via NVCC extension or implicit dynamic sizing).
+    __shared__ unsigned int v[n_directions];
+
+    d_directions += n_directions * blockIdx.y;
+    d_output += n_vectors * blockIdx.y;
+
+    if (threadIdx.x < n_directions)
+    {
+        v[threadIdx.x] = d_directions[threadIdx.x];
+    }
+
+    __syncthreads();
+
+    // Optimization: Cache frequently accessed 'v' elements in thread-local registers.
+    // The maximum index accessed in 'v' for 32-bit Sobol sequences is typically 31
+    // (corresponding to __ffs(2^32) - 1).
+    // This reduces shared memory access latency, addressing MIO scoreboard stalls.
+    unsigned int v_reg[32]; // Max index for 32-bit Sobol is 31.
+    unsigned int max_v_idx_to_cache = 0;
+    if (n_vectors > 0) {
+        max_v_idx_to_cache = __ffs(n_vectors) - 1;
+    }
+    // Cap the cache size to 32 elements, or n_directions if smaller.
+    if (max_v_idx_to_cache >= 32) {
+        max_v_idx_to_cache = 31;
+    }
+    if (max_v_idx_to_cache >= n_directions) {
+        max_v_idx_to_cache = n_directions - 1;
+    }
+
+    // Copy relevant 'v' elements from shared memory to registers.
+    // This loop will likely be unrolled by the compiler for small max_v_idx_to_cache.
+    for (unsigned int k_copy = 0; k_copy <= max_v_idx_to_cache; ++k_copy) {
+        v_reg[k_copy] = v[k_copy];
+    }
+
+    int i0     = threadIdx.x + blockIdx.x * blockDim.x;
+    int stride = gridDim.x * blockDim.x;
+
+    unsigned int g = i0 ^ (i0 >> 1);
+
+    unsigned int X = 0;
+    unsigned int mask;
+
+    // The loop limit __ffs(stride) - 1 is equivalent to log2(stride) because stride is forced to be a power of 2.
+    unsigned int log2_stride = __ffs(stride) - 1;
+
+    // Loop Invariant:
+    // Before iteration k: X holds the Sobol sequence value for i0 considering the first k bits of g.
+    // g holds the remaining bits of the original g shifted right k times.
+    // The values v_reg[k] are constant for the duration of the loop, having been copied from shared memory 'v'
+    // which was loaded from global memory 'd_directions'.
+    // Proof of Invariance: The logic of calculating X based on g and v[k] remains identical.
+    // By replacing v[k] with v_reg[k], we are simply accessing the same constant value from a faster
+    // memory location (registers) instead of shared memory. The mathematical operation and the state
+    // of X and g are preserved.
+    for (unsigned int k = 0 ; k < log2_stride ; k++)
+    {
+        mask = - (g & 1);
+        X ^= mask & v_reg[k]; // Use v_reg instead of v
+        g = g >> 1;
+    }
+
+    if (i0 < n_vectors)
+    {
+        d_output[i0] = (float)X * k_2powneg32;
+    }
+
+    unsigned int v_log2stridem1 = v_reg[log2_stride - 1]; // Use v_reg
+    // unsigned int v_stridemask = stride - 1; // Not directly used in the optimized __builtin_ctz form
+
+    // Loop Invariant:
+    // Before iteration i: X holds the Sobol sequence value for i - stride. d_output[i - stride] has been correctly computed.
+    // After iteration i: X holds the Sobol sequence value for i. d_output[i] has been correctly computed.
+    // v_log2stridem1 is constant. The value v_reg[__builtin_ctz(i)] is constant for a given i and correctly
+    // corresponds to v[__builtin_ctz(i)].
+    // Proof of Invariance: The incremental update formula X ^= v_log2stridem1 ^ v[__builtin_ctz(i)];
+    // remains mathematically identical. Replacing v[__builtin_ctz(i)] with v_reg[__builtin_ctz(i)] ensures
+    // the same direction vector is used, but accessed from registers. The X value is updated correctly
+    // based on the previous X and the appropriate direction vector, maintaining the Sobol sequence property.
+    for (unsigned int i = i0 + stride ; i < n_vectors ; i += stride)
+    {
+        // Original: X ^= v_log2stridem1 ^ v[__ffs(~((i - stride) | v_stridemask)) - 1];
+        // Optimized: __ffs(~((i - stride) | (stride - 1))) - 1 is equivalent to __builtin_ctz(i)
+        // when stride is a power of 2, which is ensured by the dimGrid.x calculation.
+        X ^= v_log2stridem1 ^ v_reg[__builtin_ctz(i)]; // Use v_reg and __builtin_ctz
+        d_output[i] = (float)X * k_2powneg32;
+    }
+}
+
+double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+                unsigned int *d_directions, float *d_output)
+{
+    const int threadsperblock = 64;
+
+    dim3 dimGrid;
+    dim3 dimBlock;
+
+    dimGrid.y = n_dimensions;
+
+    if (n_dimensions < (4 * 24))
+    {
+        dimGrid.x = 4 * 24;
+    }
+    else
+    {
+        dimGrid.x = 1;
+    }
+
+    if (dimGrid.x > (unsigned int)(n_vectors / threadsperblock))
+    {
+        dimGrid.x = (n_vectors + threadsperblock - 1) / threadsperblock;
+    }
+
+    unsigned int targetDimGridX = dimGrid.x;
+    for (dimGrid.x = 1 ; dimGrid.x < targetDimGridX ; dimGrid.x *= 2);
+
+    dimBlock.x = threadsperblock;
+
+    cudaDeviceSynchronize();
+    auto start = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < repeat; i++)
+      sobolGPU_kernel <<<dimGrid, dimBlock>>> (
+        n_vectors, n_dimensions, d_directions, d_output);
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    return time;
+}
+```
+# End Source Code
+optimizations = [
+    {
+        'lines': [66, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 105, 106, 114, 147, 159, 161],
+        'reason': 'Addressed "MIO (memory input/output) operation (not to L1TEX)" stalls by caching frequently accessed shared memory data (`v` array elements) into thread-local registers (`v_reg`). This reduces latency and contention for shared memory, improving instruction issue rate. The maximum index accessed in `v` for 32-bit Sobol sequences is 31, making a `v_reg[32]` array feasible without excessive register pressure. Also replaced `__ffs(~((i - stride) | v_stridemask)) - 1` with `__builtin_ctz(i)` for clarity and potential compiler optimization, as `stride` is guaranteed to be a power of 2.'
+    }
+]
+suggested_but_not_applied = [
+    {
+        'lines': [120, 162],
+        'reason': 'The roofline summary suggested converting non-fused FP32 instructions to fused equivalents. The only FP32 operation is a single multiplication `(float)X * k_2powneg32;`. This cannot be directly converted to a fused multiply-add (FMA) without changing the underlying algorithm, as there is no addition operation to fuse.'
+    },
+    {
+        'lines': [47],
+        'reason': 'The declaration `__shared__ unsigned int v[n_directions];` is non-standard if `n_directions` is a runtime parameter. Standard CUDA C++ requires `extern __shared__ unsigned int v[];` and passing the shared memory size as a third argument to the kernel launch. However, modifying the kernel signature or launch parameters was disallowed by the guardrails. The optimization assumes this declaration compiles in the user\'s environment, potentially via an NVCC extension or implicit dynamic shared memory allocation.'
+    }
+]

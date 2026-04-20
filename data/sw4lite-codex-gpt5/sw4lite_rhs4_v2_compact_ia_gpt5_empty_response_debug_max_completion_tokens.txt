@@ -1,0 +1,41 @@
+{
+  "model": "gpt-5",
+  "token_key": "max_completion_tokens",
+  "response_type": "<class 'openai.openai_object.OpenAIObject'>",
+  "choices_count": 1,
+  "response": {
+    "id": "chatcmpl-DVeN8mos8hwOMl3vBdiwK5Qoafm4T",
+    "object": "chat.completion",
+    "created": 1776435730,
+    "model": "gpt-5-2025-08-07",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "refusal": null,
+          "annotations": []
+        },
+        "finish_reason": "length"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 23106,
+      "completion_tokens": 16384,
+      "total_tokens": 39490,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "audio_tokens": 0
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 16384,
+        "audio_tokens": 0,
+        "accepted_prediction_tokens": 0,
+        "rejected_prediction_tokens": 0
+      }
+    },
+    "service_tier": "default",
+    "system_fingerprint": null
+  }
+}

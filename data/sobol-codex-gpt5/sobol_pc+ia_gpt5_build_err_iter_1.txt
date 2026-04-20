@@ -1,0 +1,19 @@
+sobol.cu: In function 'int main(int, char**)':
+sobol.cu:176:8: warning: 'void operator delete(void*, std::size_t)' called on pointer returned from a mismatched allocation function [-Wmismatched-new-delete]
+  176 |     delete h_directions;
+      |        ^~~~~~~~~~~~
+sobol.cu:80:48: note: returned from 'void* operator new [](std::size_t)'
+   80 |         h_directions = new unsigned int [n_dimensions * n_directions];
+      |                                                ^
+sobol.cu:177:8: warning: 'void operator delete(void*, std::size_t)' called on pointer returned from a mismatched allocation function [-Wmismatched-new-delete]
+  177 |     delete h_outputCPU;
+      |        ^~~~~~~~~~~
+sobol.cu:81:51: note: returned from 'void* operator new [](std::size_t)'
+   81 |         h_outputCPU  = new float [n_vectors * n_dimensions];
+      |                                                   ^
+sobol.cu:178:8: warning: 'void operator delete(void*, std::size_t)' called on pointer returned from a mismatched allocation function [-Wmismatched-new-delete]
+  178 |     delete h_outputGPU;
+      |        ^~~~~~~~~~~
+sobol.cu:82:51: note: returned from 'void* operator new [](std::size_t)'
+   82 |         h_outputGPU  = new float [n_vectors * n_dimensions];
+      |                                                   ^

@@ -1,0 +1,451 @@
+CMake Deprecation Warning at CMakeLists.txt:1 (cmake_minimum_required):
+  Compatibility with CMake < 3.10 will be removed from a future version of
+  CMake.
+
+  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
+  to tell CMake that the project requires at least <min> but has been updated
+  to work with policies introduced by <max> or earlier.
+
+
+CMake Warning at CMakeLists.txt:4 (message):
+  This cmakefile only builds cuda version!
+
+
+CMake Warning (dev) in CMakeLists.txt:
+  Policy CMP0104 is not set: CMAKE_CUDA_ARCHITECTURES now detected for NVCC,
+  empty CUDA_ARCHITECTURES not allowed.  Run "cmake --help-policy CMP0104"
+  for policy details.  Use the cmake_policy command to set the policy and
+  suppress this warning.
+
+  CUDA_ARCHITECTURES is empty for target "sw4lite".
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) in CMakeLists.txt:
+  Policy CMP0104 is not set: CMAKE_CUDA_ARCHITECTURES now detected for NVCC,
+  empty CUDA_ARCHITECTURES not allowed.  Run "cmake --help-policy CMP0104"
+  for policy details.  Use the cmake_policy command to set the policy and
+  suppress this warning.
+
+  CUDA_ARCHITECTURES is empty for target "sw4lite".
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    CMAKE_C_COMPILER
+
+
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/sacsubc.C(133): warning #550-D: variable "nread" was set but never used
+   int maxpts, nread;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/sacsubc.C(213): warning #550-D: variable "nwrite" was set but never used
+   int nwrite;
+       ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/sacsubc.C(244): warning #177-D: variable "nread" was declared but never referenced
+   int maxpts, nread;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/sacsubc.C(245): warning #177-D: variable "j1" was declared but never referenced
+   int i, j, j1, j2, k, l;
+             ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/sacsubc.C(245): warning #177-D: variable "j2" was declared but never referenced
+   int i, j, j1, j2, k, l;
+                 ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/sacsubc.C(249): warning #177-D: variable "ival" was declared but never referenced
+   int ival;
+       ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/sacsubc.C(381): warning #177-D: variable "nwrite" was declared but never referenced
+   int nwrite;
+       ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/sacsubc.C(684): warning #177-D: variable "j" was declared but never referenced
+   int i,j;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/sacsubc.C(738): warning #177-D: variable "retval" was declared but never referenced
+   int retval;
+       ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/sacsubc.C(99): warning #177-D: variable "NIVAL" was declared but never referenced
+  static int NIVAL=50;
+             ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/rhs4sg_rev.C(81): warning #177-D: variable "nic" was declared but never referenced
+     const int nic = 3*ni;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/rhs4sg_rev.C(82): warning #177-D: variable "nijc" was declared but never referenced
+     const int nijc = 3*nij;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/rhs4sg_rev.C(88): warning #177-D: variable "m" was declared but never referenced
+     int i, j, k, q, m, qb, mb;
+                     ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/TimeSeries.C(928): warning #177-D: variable "lat" was declared but never referenced
+     double lat, lon;
+            ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/TimeSeries.C(928): warning #177-D: variable "lon" was declared but never referenced
+     double lat, lon;
+                 ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/TimeSeries.C(929): warning #177-D: variable "x" was declared but never referenced
+     double x, y, z;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/TimeSeries.C(929): warning #177-D: variable "y" was declared but never referenced
+     double x, y, z;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/TimeSeries.C(929): warning #177-D: variable "z" was declared but never referenced
+     double x, y, z;
+                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1520): warning #177-D: variable "je" was declared but never referenced
+    int ie = u.m_ie, ib=u.m_ib, je=u.m_je, jb=u.m_jb, kb=u.m_kb;
+                                ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1521): warning #177-D: variable "status" was declared but never referenced
+    MPI_Status status;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1536): warning #177-D: variable "idx_left" was declared but never referenced
+    int idx_left = 0;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1537): warning #177-D: variable "idx_right" was declared but never referenced
+    int idx_right = n_m_ppadding2;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1565): warning #177-D: variable "ie" was declared but never referenced
+    int ie = u.m_ie, ib=u.m_ib, je=u.m_je, jb=u.m_jb, kb=u.m_kb;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1566): warning #177-D: variable "status" was declared but never referenced
+    MPI_Status status;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1583): warning #177-D: variable "idx_up" was declared but never referenced
+    int idx_up = 2*n_m_ppadding2;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1584): warning #177-D: variable "idx_down" was declared but never referenced
+    int idx_down = 2*n_m_ppadding2 + n_m_ppadding1;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1611): warning #177-D: variable "je" was declared but never referenced
+    int ie = u.m_ie, ib=u.m_ib, je=u.m_je, jb=u.m_jb, kb=u.m_kb;
+                                ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1612): warning #177-D: variable "status" was declared but never referenced
+    MPI_Status status;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1627): warning #177-D: variable "idx_left" was declared but never referenced
+    int idx_left = 0;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1628): warning #177-D: variable "idx_right" was declared but never referenced
+    int idx_right = n_m_ppadding2;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1657): warning #177-D: variable "ie" was declared but never referenced
+    int ie = u.m_ie, ib=u.m_ib, je=u.m_je, jb=u.m_jb, kb=u.m_kb;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1658): warning #177-D: variable "status" was declared but never referenced
+    MPI_Status status;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1675): warning #177-D: variable "idx_up" was declared but never referenced
+    int idx_up = 2*n_m_ppadding2;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1676): warning #177-D: variable "idx_down" was declared but never referenced
+    int idx_down = 2*n_m_ppadding2 + n_m_ppadding1;
+        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1730): warning #177-D: variable "ytag1" was declared but never referenced
+        int ytag1 = 347;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1731): warning #177-D: variable "ytag2" was declared but never referenced
+        int ytag2 = 348;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1745): warning #177-D: variable "ytag1" was declared but never referenced
+        int ytag1 = 347;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1746): warning #177-D: variable "ytag2" was declared but never referenced
+        int ytag2 = 348;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1704): warning #177-D: variable "je" was declared but never referenced
+     int ie = u.m_ie, ib=u.m_ib, je=u.m_je, jb=u.m_jb, kb=u.m_kb;
+                                 ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1707): warning #550-D: variable "gridsize" was set but never used
+     dim3 gridsize, blocksize;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1707): warning #550-D: variable "blocksize" was set but never used
+     dim3 gridsize, blocksize;
+                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1721): warning #177-D: variable "idx_left" was declared but never referenced
+     int idx_left = 0;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1722): warning #177-D: variable "idx_right" was declared but never referenced
+     int idx_right = n_m_ppadding2;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1879): warning #177-D: variable "xtag1" was declared but never referenced
+        int xtag1 = 345;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1880): warning #177-D: variable "xtag2" was declared but never referenced
+        int xtag2 = 346;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1894): warning #177-D: variable "xtag1" was declared but never referenced
+        int xtag1 = 345;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1895): warning #177-D: variable "xtag2" was declared but never referenced
+        int xtag2 = 346;
+            ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1855): warning #177-D: variable "ie" was declared but never referenced
+     int ie = u.m_ie, ib=u.m_ib, je=u.m_je, jb=u.m_jb, kb=u.m_kb;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1858): warning #550-D: variable "gridsize" was set but never used
+     dim3 gridsize, blocksize;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1858): warning #550-D: variable "blocksize" was set but never used
+     dim3 gridsize, blocksize;
+                    ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1874): warning #177-D: variable "idx_up" was declared but never referenced
+     int idx_up = 2*n_m_ppadding2;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW_cuda.C(1875): warning #177-D: variable "idx_down" was declared but never referenced
+     int idx_down = 2*n_m_ppadding2 + n_m_ppadding1;
+         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/device-routines.C(10048): error: identifier "nijk" is undefined
+      shu[0][0][threadIdx.y][threadIdx.x] = (c_order ? a_u[idx+(0)*nijk] : a_u[3*(idx)+0]);
+                                                                   ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/device-routines.C(10070): error: identifier "nijk" is undefined
+      shu[0][0][threadIdx.y][threadIdx.x+16] = (c_order ? a_u[idx+(0)*nijk] : a_u[3*(idx)+0]);
+                                                                      ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/device-routines.C(10092): error: identifier "nijk" is undefined
+      shu[0][0][threadIdx.y+16][threadIdx.x] = (c_order ? a_u[idx+(0)*nijk] : a_u[3*(idx)+0]);
+                                                                      ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/device-routines.C(10114): error: identifier "nijk" is undefined
+      shu[0][0][threadIdx.y+16][threadIdx.x+16] = (c_order ? a_u[idx+(0)*nijk] : a_u[3*(idx)+0]);
+                                                                         ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/device-routines.C(10200): error: identifier "nijk" is undefined
+          a0 = (c_order ? a_u[idx+(0)*nijk] : a_u[3*(idx)+0]);
+                                      ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/device-routines.C(10206): error: identifier "nijk" is undefined
+          b0 = (c_order ? a_u[idx+(0)*nijk] : a_u[3*(idx)+0]);
+                                      ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/device-routines.C(10212): error: identifier "nijk" is undefined
+          c0 = (c_order ? a_u[idx+(0)*nijk] : a_u[3*(idx)+0]);
+                                      ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/device-routines.C(10218): error: identifier "nijk" is undefined
+          d0 = (c_order ? a_u[idx+(0)*nijk] : a_u[3*(idx)+0]);
+                                      ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/device-routines.C(10251): error: identifier "nijk" is undefined
+          fo0 = (c_order ? a_fo[idx+(0)*nijk] : a_fo[3*(idx)+0]);
+                                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/device-routines.C(10460): error: identifier "nijk" is undefined
+          (c_order ? a_up[idx+(0)*nijk] : a_up[3*(idx)+0]) = 2 * shu[0][kthm2][tj][ti] - um0 + fact * (cof * r1 + fo0);
+                                  ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/device-routines.C(10467): error: identifier "nijk" is undefined
+          (c_order ? a_up[idx+(0)*nijk] : a_up[3*(idx)+0]) = up0 + fact * (cof * r1 + fo0);
+                                  ^
+
+11 errors detected in the compilation of "/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/device-routines.C".
+make[2]: *** [CMakeFiles/sw4lite.dir/build.make:245: CMakeFiles/sw4lite.dir/src/device-routines.C.o] Error 2
+make[2]: *** Waiting for unfinished jobs....
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(478): warning #177-D: variable "n_int" was declared but never referenced
+      int n_int = m_nint;
+          ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(479): warning #177-D: variable "q_u" was declared but never referenced
+      int q_u = m_qu;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(480): warning #177-D: variable "q_v" was declared but never referenced
+      int q_v = m_qv;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(483): warning #550-D: variable "mu" was set but never used
+      double mu, lambda,rho;
+             ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(483): warning #550-D: variable "lambda" was set but never used
+      double mu, lambda,rho;
+                 ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(483): warning #550-D: variable "rho" was set but never used
+      double mu, lambda,rho;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(554): warning #550-D: variable "parameters" was set but never used
+          double parameters[11];
+                 ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(514): warning #177-D: variable "n_int" was declared but never referenced
+      int n_int = m_nint;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(515): warning #177-D: variable "q_u" was declared but never referenced
+      int q_u = m_qu;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(516): warning #177-D: variable "q_v" was declared but never referenced
+      int q_v = m_qv;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(601): warning #177-D: variable "n_int" was declared but never referenced
+      int n_int = m_nint;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(602): warning #177-D: variable "q_u" was declared but never referenced
+      int q_u = m_qu;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(603): warning #177-D: variable "q_v" was declared but never referenced
+      int q_v = m_qv;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(605): warning #550-D: variable "mu" was set but never used
+      double mu, lambda,rho;
+             ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(605): warning #550-D: variable "lambda" was set but never used
+      double mu, lambda,rho;
+                 ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(605): warning #550-D: variable "rho" was set but never used
+      double mu, lambda,rho;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(637): warning #177-D: variable "n_int_id" was declared but never referenced
+      int n_int_id = 3*m_nint;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(638): warning #177-D: variable "q_u" was declared but never referenced
+      int q_u = m_qu;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(639): warning #177-D: variable "q_v" was declared but never referenced
+      int q_v = m_qv;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(641): warning #550-D: variable "id_type" was set but never used
+      int id_type = 0;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(667): warning #177-D: variable "n_int" was declared but never referenced
+      int n_int = m_nint;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(668): warning #177-D: variable "q_u" was declared but never referenced
+      int q_u = m_qu;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(669): warning #177-D: variable "q_v" was declared but never referenced
+      int q_v = m_qv;
+          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(672): warning #550-D: variable "mu" was set but never used
+      double mu, lambda,rho;
+             ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(672): warning #550-D: variable "lambda" was set but never used
+      double mu, lambda,rho;
+                 ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/EW-dg.C(672): warning #550-D: variable "rho" was set but never used
+      double mu, lambda,rho;
+                        ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/curvilinear-c.C(325): warning #550-D: variable "zz" was set but never used
+       double zp, zq, zr, zz;
+                          ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/curvilinear-c.C(409): warning #550-D: variable "zz" was set but never used
+       double zp, zq, zr, zz;
+                          ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/curvilinear-c.C(394): warning #177-D: variable "nic" was declared but never referenced
+     const int nic = 4*ni;
+               ^
+
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl+ia/src/curvilinear-c.C(395): warning #177-D: variable "nijc" was declared but never referenced
+     const int nijc = 4*nij;
+               ^
+
+make[1]: *** [CMakeFiles/Makefile2:87: CMakeFiles/sw4lite.dir/all] Error 2
+make: *** [Makefile:91: all] Error 2

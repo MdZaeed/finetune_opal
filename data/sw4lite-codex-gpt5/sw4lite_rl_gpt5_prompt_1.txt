@@ -1,0 +1,856 @@
+# Begin Source Code
+```cpp```
+1:   __global__ void rhs4_v2 (int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+2:                         int ni, int nj, int nk,
+3:                         float_sw4* __restrict__ a_up,
+4:                         const float_sw4* __restrict__ a_u,
+5:                         const float_sw4* __restrict__ a_um,
+6:                         const float_sw4* __restrict__ a_mu,
+7:                         const float_sw4* __restrict__ a_lambda,
+8:                         const float_sw4* __restrict__ a_rho,
+9:                         const float_sw4* __restrict__ a_fo,
+10:                         const float_sw4* __restrict__ a_strx,
+11:                         const float_sw4* __restrict__ a_stry,
+12:                         const float_sw4* __restrict__ a_strz,
+13:                         const float_sw4 h,
+14:                         const float_sw4 dt) {
+15:   int index;
+16:
+17:   const float_sw4 i6   = 1.0/6;
+18:   const float_sw4 i144 = 1.0/144;
+19:   const float_sw4 tf   = 0.75;
+20:
+21:   float_sw4 strx_im2, strx_im1, strx_i, strx_ip1, strx_ip2;
+22:   float_sw4 stry_jm2, stry_jm1, stry_j, stry_jp1, stry_jp2;
+23:   float_sw4 strz_km2, strz_km1, strz_k, strz_kp1, strz_kp2;
+24:
+25:   float_sw4 la_km2, la_km1, la_ijk, la_kp1, la_kp2;
+26:   float_sw4 la_im2, la_im1, la_ip1, la_ip2;
+27:   float_sw4 la_jm2, la_jm1, la_jp1, la_jp2;
+28:
+29:   float_sw4 mu_km2, mu_km1, mu_ijk, mu_kp1, mu_kp2;
+30:   float_sw4 mu_im2, mu_im1, mu_ip1, mu_ip2;
+31:   float_sw4 mu_jm2, mu_jm1, mu_jp1, mu_jp2;
+32:
+33:   float_sw4 fo0, fo1, fo2, rho;
+34:   float_sw4 up0, up1, up2;
+35:   float_sw4 um0, um1, um2;
+36:
+37:   float_sw4 a0, a1, a2, b0, b1, b2, c0, c1, c2, d0, d1, d2;
+38:
+39:   float_sw4 r1, r2, r3, cof;
+40:   int active=0, loader=0, loady2=0, loadx2=0;
+41:
+42:   __shared__ float_sw4 shu[3][5][BY+4][BX+4];
+43:
+44:   const int i = threadIdx.x + blockIdx.x * BX;
+45:   const int j = jfirst + threadIdx.y + blockIdx.y * BY;
+46:
+47:   const int ti = threadIdx.x + 2;
+48:   const int tj = threadIdx.y + 2;
+49:   const int tk = 2;
+50:
+51:   const int nij = ni * nj;
+52:   const int nijk = nij * nk;
+53:
+54:   int kthm0=3, kthm1=2, kthm2=1, kthm3=0, kthm4=4, kthtmp;
+55:
+56:   if (i >= ifirst && i <= ilast && j <= jlast)
+57:     active = 1;
+58:
+59:   if (j-2 <= jlast + 2) {
+60:     if (i-2 >= 0 && i-2 < ni)
+61:       loader = 1;
+62:     if (threadIdx.x < 4 && i+BX-2 < ni)
+63:       loadx2 = 1;
+64:     if (threadIdx.y < 4 && j+BY-2 <= jlast+2)
+65:       loady2 = 1;
+66:   }
+67:
+68:   index = (kfirst - 2) * nij + (j - 2) * ni + i - 2;
+69:
+70:   if (loader) {
+71:     int idx = index;
+72:     shu[0][0][threadIdx.y][threadIdx.x] = u(0,idx);
+73:     shu[1][0][threadIdx.y][threadIdx.x] = u(1,idx);
+74:     shu[2][0][threadIdx.y][threadIdx.x] = u(2,idx);
+75:     idx += nij;
+76:     shu[0][1][threadIdx.y][threadIdx.x] = u(0,idx);
+77:     shu[1][1][threadIdx.y][threadIdx.x] = u(1,idx);
+78:     shu[2][1][threadIdx.y][threadIdx.x] = u(2,idx);
+79:     idx += nij;
+80:     shu[0][2][threadIdx.y][threadIdx.x] = u(0,idx);
+81:     shu[1][2][threadIdx.y][threadIdx.x] = u(1,idx);
+82:     shu[2][2][threadIdx.y][threadIdx.x] = u(2,idx);
+83:     idx += nij;
+84:     shu[0][3][threadIdx.y][threadIdx.x] = u(0,idx);
+85:     shu[1][3][threadIdx.y][threadIdx.x] = u(1,idx);
+86:     shu[2][3][threadIdx.y][threadIdx.x] = u(2,idx);
+87:     idx += nij;
+88:     a0 = u(0,idx);
+89:     a1 = u(1,idx);
+90:     a2 = u(2,idx);
+91:   }
+92:   if (loadx2) {
+93:     int idx = index + BX;
+94:     shu[0][0][threadIdx.y][threadIdx.x+BX] = u(0,idx);
+95:     shu[1][0][threadIdx.y][threadIdx.x+BX] = u(1,idx);
+96:     shu[2][0][threadIdx.y][threadIdx.x+BX] = u(2,idx);
+97:     idx += nij;
+98:     shu[0][1][threadIdx.y][threadIdx.x+BX] = u(0,idx);
+99:     shu[1][1][threadIdx.y][threadIdx.x+BX] = u(1,idx);
+100:     shu[2][1][threadIdx.y][threadIdx.x+BX] = u(2,idx);
+101:     idx += nij;
+102:     shu[0][2][threadIdx.y][threadIdx.x+BX] = u(0,idx);
+103:     shu[1][2][threadIdx.y][threadIdx.x+BX] = u(1,idx);
+104:     shu[2][2][threadIdx.y][threadIdx.x+BX] = u(2,idx);
+105:     idx += nij;
+106:     shu[0][3][threadIdx.y][threadIdx.x+BX] = u(0,idx);
+107:     shu[1][3][threadIdx.y][threadIdx.x+BX] = u(1,idx);
+108:     shu[2][3][threadIdx.y][threadIdx.x+BX] = u(2,idx);
+109:     idx += nij;
+110:     b0 = u(0,idx);
+111:     b1 = u(1,idx);
+112:     b2 = u(2,idx);
+113:   }
+114:   if (loader && loady2) {
+115:     int idx = index + BY * ni;
+116:     shu[0][0][threadIdx.y+BY][threadIdx.x] = u(0,idx);
+117:     shu[1][0][threadIdx.y+BY][threadIdx.x] = u(1,idx);
+118:     shu[2][0][threadIdx.y+BY][threadIdx.x] = u(2,idx);
+119:     idx += nij;
+120:     shu[0][1][threadIdx.y+BY][threadIdx.x] = u(0,idx);
+121:     shu[1][1][threadIdx.y+BY][threadIdx.x] = u(1,idx);
+122:     shu[2][1][threadIdx.y+BY][threadIdx.x] = u(2,idx);
+123:     idx += nij;
+124:     shu[0][2][threadIdx.y+BY][threadIdx.x] = u(0,idx);
+125:     shu[1][2][threadIdx.y+BY][threadIdx.x] = u(1,idx);
+126:     shu[2][2][threadIdx.y+BY][threadIdx.x] = u(2,idx);
+127:     idx += nij;
+128:     shu[0][3][threadIdx.y+BY][threadIdx.x] = u(0,idx);
+129:     shu[1][3][threadIdx.y+BY][threadIdx.x] = u(1,idx);
+130:     shu[2][3][threadIdx.y+BY][threadIdx.x] = u(2,idx);
+131:     idx += nij;
+132:     c0 = u(0,idx);
+133:     c1 = u(1,idx);
+134:     c2 = u(2,idx);
+135:   }
+136:   if (loadx2 && loady2) {
+137:     int idx = index + BY * ni + BX;
+138:     shu[0][0][threadIdx.y+BY][threadIdx.x+BX] = u(0,idx);
+139:     shu[1][0][threadIdx.y+BY][threadIdx.x+BX] = u(1,idx);
+140:     shu[2][0][threadIdx.y+BY][threadIdx.x+BX] = u(2,idx);
+141:     idx += nij;
+142:     shu[0][1][threadIdx.y+BY][threadIdx.x+BX] = u(0,idx);
+143:     shu[1][1][threadIdx.y+BY][threadIdx.x+BX] = u(1,idx);
+144:     shu[2][1][threadIdx.y+BY][threadIdx.x+BX] = u(2,idx);
+145:     idx += nij;
+146:     shu[0][2][threadIdx.y+BY][threadIdx.x+BX] = u(0,idx);
+147:     shu[1][2][threadIdx.y+BY][threadIdx.x+BX] = u(1,idx);
+148:     shu[2][2][threadIdx.y+BY][threadIdx.x+BX] = u(2,idx);
+149:     idx += nij;
+150:     shu[0][3][threadIdx.y+BY][threadIdx.x+BX] = u(0,idx);
+151:     shu[1][3][threadIdx.y+BY][threadIdx.x+BX] = u(1,idx);
+152:     shu[2][3][threadIdx.y+BY][threadIdx.x+BX] = u(2,idx);
+153:     idx += nij;
+154:     d0 = u(0,idx);
+155:     d1 = u(1,idx);
+156:     d2 = u(2,idx);
+157:   }
+158:
+159:   if (active) {
+160:
+161:     strx_im2 = a_strx[i-2];
+162:     strx_im1 = a_strx[i-1];
+163:     strx_i   = a_strx[i];
+164:     strx_ip1 = a_strx[i+1];
+165:     strx_ip2 = a_strx[i+2];
+166:
+167:     stry_jm2 = a_stry[j-2];
+168:     stry_jm1 = a_stry[j-1];
+169:     stry_j   = a_stry[j];
+170:     stry_jp1 = a_stry[j+1];
+171:     stry_jp2 = a_stry[j+2];
+172:
+173:     int idx = index + 2 * ni + 2;
+174:     la_km2 = a_lambda[idx];
+175:     mu_km2 = a_mu[idx];
+176:     idx += nij;
+177:     la_km1 = a_lambda[idx];
+178:     mu_km1 = a_mu[idx];
+179:     idx += nij;
+180:     la_ijk = a_lambda[idx];
+181:     mu_ijk = a_mu[idx];
+182:     idx += nij;
+183:     la_kp1 = a_lambda[idx];
+184:     mu_kp1 = a_mu[idx];
+185:   }
+186:
+187:   index += 4 * nij;
+188:
+189:   strz_km2 = a_strz[kfirst-2];
+190:   strz_km1 = a_strz[kfirst-1];
+191:   strz_k   = a_strz[kfirst];
+192:   strz_kp1 = a_strz[kfirst+1];
+193:
+194:   cof = 1.0/(h*h);
+195:
+196:   for (int k = kfirst; k <= klast; k++) {
+197:
+198:     kthtmp = kthm4;
+199:     kthm4  = kthm3;
+200:     kthm3  = kthm2;
+201:     kthm2  = kthm1;
+202:     kthm1  = kthm0;
+203:     kthm0  = kthtmp;
+204:
+205:     __syncthreads();
+206:
+207:     shu[0][kthm0][threadIdx.y][threadIdx.x] = a0;
+208:     shu[1][kthm0][threadIdx.y][threadIdx.x] = a1;
+209:     shu[2][kthm0][threadIdx.y][threadIdx.x] = a2;
+210:
+211:     if (threadIdx.x < 4) {
+212:       shu[0][kthm0][threadIdx.y][threadIdx.x+BX] = b0;
+213:       shu[1][kthm0][threadIdx.y][threadIdx.x+BX] = b1;
+214:       shu[2][kthm0][threadIdx.y][threadIdx.x+BX] = b2;
+215:     }
+216:     if (threadIdx.y < 4) {
+217:       shu[0][kthm0][threadIdx.y+BY][threadIdx.x] = c0;
+218:       shu[1][kthm0][threadIdx.y+BY][threadIdx.x] = c1;
+219:       shu[2][kthm0][threadIdx.y+BY][threadIdx.x] = c2;
+220:       if (threadIdx.x < 4) {
+221:         shu[0][kthm0][threadIdx.y+BY][threadIdx.x+BX] = d0;
+222:         shu[1][kthm0][threadIdx.y+BY][threadIdx.x+BX] = d1;
+223:         shu[2][kthm0][threadIdx.y+BY][threadIdx.x+BX] = d2;
+224:       }
+225:     }
+226:     __syncthreads();
+227:
+228:     if (k < klast) {
+229:       int idx = index + nij;
+230:       if (loader) {
+231: 	a0 = u(0,idx);
+232: 	a1 = u(1,idx);
+233: 	a2 = u(2,idx);
+234:       }
+235:       idx += BX;
+236:       if (loadx2) {
+237: 	b0 = u(0,idx);
+238: 	b1 = u(1,idx);
+239: 	b2 = u(2,idx);
+240:       }
+241:       idx = index + nij + BY * ni;
+242:       if (loader & loady2) {
+243: 	c0 = u(0,idx);
+244: 	c1 = u(1,idx);
+245: 	c2 = u(2,idx);
+246:       }
+247:       idx += BX;
+248:       if (loadx2 && loady2) {
+249: 	d0 = u(0,idx);
+250: 	d1 = u(1,idx);
+251: 	d2 = u(2,idx);
+252:       }
+253:     }
+254:
+255:     if (active) {
+256:
+257:       strz_kp2 = a_strz[k+2];
+258:
+259:       {
+260: 	int idx = index + 2 * ni + 2;
+261: 	la_kp2 = a_lambda[idx];
+262: 	mu_kp2 = a_mu[idx];
+263:
+264: 	idx -= 2 * nij;
+265: 	la_im2 = a_lambda[idx-2];
+266: 	la_im1 = a_lambda[idx-1];
+267: 	la_ip1 = a_lambda[idx+1];
+268: 	la_ip2 = a_lambda[idx+2];
+269: 	la_jm2 = a_lambda[idx-2*ni];
+270: 	la_jm1 = a_lambda[idx-1*ni];
+271: 	la_jp1 = a_lambda[idx+ni];
+272: 	la_jp2 = a_lambda[idx+2*ni];
+273: 	mu_im2 = a_mu[idx-2];
+274: 	mu_im1 = a_mu[idx-1];
+275: 	mu_ip1 = a_mu[idx+1];
+276: 	mu_ip2 = a_mu[idx+2];
+277: 	mu_jm2 = a_mu[idx-2*ni];
+278: 	mu_jm1 = a_mu[idx-ni];
+279: 	mu_jp1 = a_mu[idx+ni];
+280: 	mu_jp2 = a_mu[idx+2*ni];
+281:
+282: 	fo0 = fo(0,idx);
+283: 	fo1 = fo(1,idx);
+284: 	fo2 = fo(2,idx);
+285: 	rho = a_rho[idx];
+286: 	if (pred) {
+287: 	  um0 = um(0,idx);
+288: 	  um1 = um(1,idx);
+289: 	  um2 = um(2,idx);
+290: 	}
+291: 	else {
+292: 	  up0 = up(0,idx);
+293: 	  up1 = up(1,idx);
+294: 	  up2 = up(2,idx);
+295: 	}
+296:       }
+297:
+298:       {
+299: 	float_sw4 mux1, mux2, mux3, mux4;
+300: 	mux1 = mu_im1 * strx_im1 - tf * (mu_ijk * strx_i + mu_im2 * strx_im2);
+301: 	mux2 = mu_im2 * strx_im2 + mu_ip1 * strx_ip1 + 3 * (mu_ijk * strx_i   + mu_im1 * strx_im1);
+302: 	mux3 = mu_im1 * strx_im1 + mu_ip2 * strx_ip2 + 3 * (mu_ip1 * strx_ip1 + mu_ijk * strx_i  );
+303: 	mux4 = mu_ip1 * strx_ip1 - tf * (mu_ijk * strx_i + mu_ip2 * strx_ip2);
+304:
+305: 	r1 = strx_i * ((2 * mux1 + la_im1 * strx_im1 - tf * (la_ijk * strx_i   + la_im2 * strx_im2)) *
+306: 		       (shu[0][kthm2][tj+0][ti-2] - shu[0][kthm2][tj+0][ti+0]) +
+307: 		       (2 * mux2 + la_im2 * strx_im2 + la_ip1 * strx_ip1 +
+308: 			3 * (la_ijk * strx_i   + la_im1 * strx_im1)) *
+309: 		       (shu[0][kthm2][tj+0][ti-1] - shu[0][kthm2][tj+0][ti+0]) +
+310: 		       (2 * mux3 + la_im1 * strx_im1 + la_ip2 * strx_ip2 +
+311: 			3 * (la_ip1 * strx_ip1 + la_ijk * strx_i  )) *
+312: 		       (shu[0][kthm2][tj+0][ti+1] - shu[0][kthm2][tj+0][ti+0]) +
+313: 		       (2 * mux4 + la_ip1 * strx_ip1 - tf * (la_ijk * strx_i   + la_ip2 * strx_ip2)) *
+314: 		       (shu[0][kthm2][tj+0][ti+2] - shu[0][kthm2][tj+0][ti+0]));
+315: 	r2 = strx_i * (mux1 * (shu[1][kthm2][tj+0][ti-2] - shu[1][kthm2][tj+0][ti+0]) +
+316: 		       mux2 * (shu[1][kthm2][tj+0][ti-1] - shu[1][kthm2][tj+0][ti+0]) +
+317: 		       mux3 * (shu[1][kthm2][tj+0][ti+1] - shu[1][kthm2][tj+0][ti+0]) +
+318: 		       mux4 * (shu[1][kthm2][tj+0][ti+2] - shu[1][kthm2][tj+0][ti+0]));
+319: 	r3 = strx_i * (mux1 * (shu[2][kthm2][tj+0][ti-2] - shu[2][kthm2][tj+0][ti+0]) +
+320: 		       mux2 * (shu[2][kthm2][tj+0][ti-1] - shu[2][kthm2][tj+0][ti+0]) +
+321: 		       mux3 * (shu[2][kthm2][tj+0][ti+1] - shu[2][kthm2][tj+0][ti+0]) +
+322: 		       mux4 * (shu[2][kthm2][tj+0][ti+2] - shu[2][kthm2][tj+0][ti+0]));
+323:       }
+324:
+325:       {
+326: 	float_sw4 muy1, muy2, muy3, muy4;
+327: 	muy1 = mu_jm1 * stry_jm1 - tf * (mu_ijk * stry_j + mu_jm2 * stry_jm2);
+328: 	muy2 = mu_jm2 * stry_jm2 + mu_jp1 * stry_jp1 + 3 * (mu_ijk * stry_j   + mu_jm1 * stry_jm1);
+329: 	muy3 = mu_jm1 * stry_jm1 + mu_jp2 * stry_jp2 + 3 * (mu_jp1 * stry_jp1 + mu_ijk * stry_j  );
+330: 	muy4 = mu_jp1 * stry_jp1 - tf * (mu_ijk * stry_j + mu_jp2 * stry_jp2);
+331:
+332: 	r1 += stry_j * (muy1 * (shu[0][kthm2][tj-2][ti+0] - shu[0][kthm2][tj+0][ti+0]) +
+333: 			muy2 * (shu[0][kthm2][tj-1][ti+0] - shu[0][kthm2][tj+0][ti+0]) +
+334: 			muy3 * (shu[0][kthm2][tj+1][ti+0] - shu[0][kthm2][tj+0][ti+0]) +
+335: 			muy4 * (shu[0][kthm2][tj+2][ti+0] - shu[0][kthm2][tj+0][ti+0]));
+336: 	r2 += stry_j * ((2 * muy1 + la_jm1 * stry_jm1 - tf * (la_ijk * stry_j + la_jm2 * stry_jm2)) *
+337: 			(shu[1][kthm2][tj-2][ti+0] - shu[1][kthm2][tj+0][ti+0]) +
+338: 			(2 * muy2 + la_jm2 * stry_jm2 + la_jp1 * stry_jp1 +
+339: 			 3 * (la_ijk * stry_j   + la_jm1 * stry_jm1)) *
+340: 			(shu[1][kthm2][tj-1][ti+0] - shu[1][kthm2][tj+0][ti+0]) +
+341: 			(2 * muy3 + la_jm1 * stry_jm1 + la_jp2 * stry_jp2 +
+342: 			 3 * (la_jp1 * stry_jp1 + la_ijk * stry_j  )) *
+343: 			(shu[1][kthm2][tj+1][ti+0] - shu[1][kthm2][tj+0][ti+0]) +
+344: 			(2 * muy4 + la_jp1 * stry_jp1 - tf * (la_ijk * stry_j  + la_jp2 * stry_jp2)) *
+345: 			(shu[1][kthm2][tj+2][ti+0] - shu[1][kthm2][tj+0][ti+0]));
+346: 	r3 += stry_j  *(muy1 * (shu[2][kthm2][tj-2][ti+0] - shu[2][kthm2][tj+0][ti+0]) +
+347: 			muy2 * (shu[2][kthm2][tj-1][ti+0] - shu[2][kthm2][tj+0][ti+0]) +
+348: 			muy3 * (shu[2][kthm2][tj+1][ti+0] - shu[2][kthm2][tj+0][ti+0]) +
+349: 			muy4 * (shu[2][kthm2][tj+2][ti+0] - shu[2][kthm2][tj+0][ti+0]));
+350:       }
+351:
+352:       {
+353: 	float_sw4 muz1, muz2, muz3, muz4;
+354: 	muz1 = mu_km1 * strz_km1 - tf * (mu_ijk * strz_k + mu_km2 * strz_km2);
+355: 	muz2 = mu_km2 * strz_km2 + mu_kp1 * strz_kp1 + 3 * (mu_ijk * strz_k   + mu_km1 * strz_km1);
+356: 	muz3 = mu_km1 * strz_km1 + mu_kp2 * strz_kp2 + 3 * (mu_kp1 * strz_kp1 + mu_ijk * strz_k);
+357: 	muz4 = mu_kp1 * strz_kp1 - tf * (mu_ijk * strz_k + mu_kp2 * strz_kp2);
+358: 	r1 += strz_k * (muz1 * (shu[0][kthm4][tj+0][ti+0] - shu[0][kthm2][tj+0][ti+0]) +
+359: 			muz2 * (shu[0][kthm3][tj+0][ti+0] - shu[0][kthm2][tj+0][ti+0]) +
+360: 			muz3 * (shu[0][kthm1][tj+0][ti+0] - shu[0][kthm2][tj+0][ti+0]) +
+361: 			muz4 * (shu[0][kthm0][tj+0][ti+0] - shu[0][kthm2][tj+0][ti+0]));
+362: 	r2 += strz_k * (muz1 * (shu[1][kthm4][tj+0][ti+0] - shu[1][kthm2][tj+0][ti+0]) +
+363: 			muz2 * (shu[1][kthm3][tj+0][ti+0] - shu[1][kthm2][tj+0][ti+0]) +
+364: 			muz3 * (shu[1][kthm1][tj+0][ti+0] - shu[1][kthm2][tj+0][ti+0]) +
+365: 			muz4 * (shu[1][kthm0][tj+0][ti+0] - shu[1][kthm2][tj+0][ti+0]));
+366: 	r3 += strz_k * ((2 * muz1 + la_km1 * strz_km1 - tf * (la_ijk * strz_k + la_km2 * strz_km2)) *
+367: 			(shu[2][kthm4][tj+0][ti+0] - shu[2][kthm2][tj+0][ti+0]) +
+368: 			(2 * muz2 + la_km2 * strz_km2 + la_kp1 * strz_kp1 +
+369: 			 3 * (la_ijk * strz_k   + la_km1 * strz_km1)) *
+370: 			(shu[2][kthm3][tj+0][ti+0] - shu[2][kthm2][tj+0][ti+0]) +
+371: 			(2 * muz3 + la_km1 * strz_km1 + la_kp2 * strz_kp2 +
+372: 			 3 * (la_kp1 * strz_kp1 + la_ijk * strz_k  )) *
+373: 			(shu[2][kthm1][tj+0][ti+0] - shu[2][kthm2][tj+0][ti+0]) +
+374: 			(2 * muz4 + la_kp1 * strz_kp1 - tf * (la_ijk * strz_k + la_kp2 * strz_kp2)) *
+375: 			(shu[2][kthm0][tj+0][ti+0] - shu[2][kthm2][tj+0][ti+0]));
+376:       }
+377:       r1 *= i6;
+378:       r2 *= i6;
+379:       r3 *= i6;
+380:
+381:       r1 += strx_i  * stry_j * i144 *
+382: 	(la_im2 * (shu[1][kthm2][tj-2][ti-2] - shu[1][kthm2][tj+2][ti-2] + 8 *
+383: 		   (-shu[1][kthm2][tj-1][ti-2] + shu[1][kthm2][tj+1][ti-2])) - 8 *
+384: 	 (la_im1 * (shu[1][kthm2][tj-2][ti-1] - shu[1][kthm2][tj+2][ti-1] + 8 *
+385: 		    (-shu[1][kthm2][tj-1][ti-1] + shu[1][kthm2][tj+1][ti-1]))) + 8 *
+386: 	 (la_ip1 * (shu[1][kthm2][tj-2][ti+1] - shu[1][kthm2][tj+2][ti+1] + 8 *
+387: 		    (-shu[1][kthm2][tj-1][ti+1] + shu[1][kthm2][tj+1][ti+1]))) -
+388: 	 (la_ip2 * (shu[1][kthm2][tj-2][ti+2] - shu[1][kthm2][tj+2][ti+2] + 8 *
+389: 		    (-shu[1][kthm2][tj-1][ti+2] + shu[1][kthm2][tj+1][ti+2]))))
+390:
+391:         + strx_i * strz_k * i144 *
+392: 	(la_im2 * (shu[2][kthm4][tj+0][ti-2] - shu[2][kthm0][tj+0][ti-2] + 8 *
+393: 		   (-shu[2][kthm3][tj+0][ti-2] + shu[2][kthm1][tj+0][ti-2])) - 8 *
+394: 	 (la_im1 * (shu[2][kthm4][tj+0][ti-1] - shu[2][kthm0][tj+0][ti-1] + 8 *
+395: 		    (-shu[2][kthm3][tj+0][ti-1] + shu[2][kthm1][tj+0][ti-1]))) + 8 *
+396: 	 (la_ip1 * (shu[2][kthm4][tj+0][ti+1] - shu[2][kthm0][tj+0][ti+1] + 8 *
+397: 		    (-shu[2][kthm3][tj+0][ti+1] + shu[2][kthm1][tj+0][ti+1]))) -
+398: 	 (la_ip2 * (shu[2][kthm4][tj+0][ti+2] - shu[2][kthm0][tj+0][ti+2] + 8 *
+399: 		    (-shu[2][kthm3][tj+0][ti+2] + shu[2][kthm1][tj+0][ti+2]))))
+400:
+401:         + strx_i * stry_j * i144 *
+402: 	(mu_jm2 * (shu[1][kthm2][tj-2][ti-2] - shu[1][kthm2][tj-2][ti+2] + 8 *
+403: 		   (-shu[1][kthm2][tj-2][ti-1] + shu[1][kthm2][tj-2][ti+1])) - 8 *
+404: 	 (mu_jm1 * (shu[1][kthm2][tj-1][ti-2] - shu[1][kthm2][tj-1][ti+2] + 8 *
+405: 		    (-shu[1][kthm2][tj-1][ti-1] + shu[1][kthm2][tj-1][ti+1]))) + 8 *
+406: 	 (mu_jp1 * (shu[1][kthm2][tj+1][ti-2] - shu[1][kthm2][tj+1][ti+2] + 8 *
+407: 		    (-shu[1][kthm2][tj+1][ti-1] + shu[1][kthm2][tj+1][ti+1]))) -
+408: 	 (mu_jp2 * (shu[1][kthm2][tj+2][ti-2] - shu[1][kthm2][tj+2][ti+2] + 8 *
+409: 		    (-shu[1][kthm2][tj+2][ti-1] + shu[1][kthm2][tj+2][ti+1]))))
+410:
+411:         + strx_i * strz_k * i144 *
+412: 	(mu_km2 * (shu[2][kthm4][tj+0][ti-2] - shu[2][kthm4][tj+0][ti+2] + 8 *
+413: 		   (-shu[2][kthm4][tj+0][ti-1] + shu[2][kthm4][tj+0][ti+1])) - 8 *
+414:  	 (mu_km1 * (shu[2][kthm3][tj+0][ti-2] - shu[2][kthm3][tj+0][ti+2] + 8 *
+415: 		    (-shu[2][kthm3][tj+0][ti-1] + shu[2][kthm3][tj+0][ti+1]))) + 8 *
+416:  	 (mu_kp1 * (shu[2][kthm1][tj+0][ti-2] - shu[2][kthm1][tj+0][ti+2] + 8 *
+417: 		    (-shu[2][kthm1][tj+0][ti-1] + shu[2][kthm1][tj+0][ti+1]))) -
+418: 	 (mu_kp2 * (shu[2][kthm0][tj+0][ti-2] - shu[2][kthm0][tj+0][ti+2] + 8 *
+419: 		    (-shu[2][kthm0][tj+0][ti-1] + shu[2][kthm0][tj+0][ti+1]))));
+420:
+421:       r2 += strx_i  *stry_j  *i144*
+422: 	(mu_im2 * (shu[0][kthm2][tj-2][ti-2] - shu[0][kthm2][tj+2][ti-2] + 8 *
+423: 		   (-shu[0][kthm2][tj-1][ti-2] + shu[0][kthm2][tj+1][ti-2])) - 8 *
+424: 	 (mu_im1 * (shu[0][kthm2][tj-2][ti-1] - shu[0][kthm2][tj+2][ti-1] + 8 *
+425: 		    (-shu[0][kthm2][tj-1][ti-1] + shu[0][kthm2][tj+1][ti-1]))) + 8 *
+426: 	 (mu_ip1 * (shu[0][kthm2][tj-2][ti+1] - shu[0][kthm2][tj+2][ti+1] + 8 *
+427: 		    (-shu[0][kthm2][tj-1][ti+1] + shu[0][kthm2][tj+1][ti+1]))) -
+428: 	 (mu_ip2 * (shu[0][kthm2][tj-2][ti+2] - shu[0][kthm2][tj+2][ti+2] + 8 *
+429: 		    (-shu[0][kthm2][tj-1][ti+2] + shu[0][kthm2][tj+1][ti+2]))))
+430:
+431:         + strx_i * stry_j * i144 *
+432: 	(la_jm2 * (shu[0][kthm2][tj-2][ti-2] - shu[0][kthm2][tj-2][ti+2] + 8 *
+433: 		   (-shu[0][kthm2][tj-2][ti-1] + shu[0][kthm2][tj-2][ti+1])) - 8 *
+434: 	 (la_jm1 * (shu[0][kthm2][tj-1][ti-2] - shu[0][kthm2][tj-1][ti+2] + 8 *
+435: 		    (-shu[0][kthm2][tj-1][ti-1] + shu[0][kthm2][tj-1][ti+1]))) + 8 *
+436: 	 (la_jp1 * (shu[0][kthm2][tj+1][ti-2] - shu[0][kthm2][tj+1][ti+2] + 8 *
+437: 		    (-shu[0][kthm2][tj+1][ti-1] + shu[0][kthm2][tj+1][ti+1]))) -
+438: 	 (la_jp2 * (shu[0][kthm2][tj+2][ti-2] - shu[0][kthm2][tj+2][ti+2] + 8 *
+439: 		    (-shu[0][kthm2][tj+2][ti-1] + shu[0][kthm2][tj+2][ti+1]))))
+440:
+441:         + stry_j * strz_k * i144 *
+442: 	(la_jm2 * (shu[2][kthm4][tj-2][ti+0] - shu[2][kthm0][tj-2][ti+0] + 8 *
+443: 		   (-shu[2][kthm3][tj-2][ti+0] + shu[2][kthm1][tj-2][ti+0])) - 8 *
+444: 	 (la_jm1 * (shu[2][kthm4][tj-1][ti+0] - shu[2][kthm0][tj-1][ti+0] + 8 *
+445: 		    (-shu[2][kthm3][tj-1][ti+0] + shu[2][kthm1][tj-1][ti+0]))) + 8 *
+446: 	 (la_jp1 * (shu[2][kthm4][tj+1][ti+0] - shu[2][kthm0][tj+1][ti+0] + 8 *
+447: 		    (-shu[2][kthm3][tj+1][ti+0] + shu[2][kthm1][tj+1][ti+0]))) -
+448: 	 (la_jp2 * (shu[2][kthm4][tj+2][ti+0] - shu[2][kthm0][tj+2][ti+0] + 8 *
+449: 		    (-shu[2][kthm3][tj+2][ti+0] + shu[2][kthm1][tj+2][ti+0]))))
+450:
+451:         + stry_j * strz_k * i144 *
+452: 	(mu_km2 * (shu[2][kthm4][tj-2][ti+0] - shu[2][kthm4][tj+2][ti+0] + 8 *
+453: 		   (-shu[2][kthm4][tj-1][ti+0] + shu[2][kthm4][tj+1][ti+0])) - 8 *
+454: 	 (mu_km1 * (shu[2][kthm3][tj-2][ti+0] - shu[2][kthm3][tj+2][ti+0] + 8 *
+455: 		    (-shu[2][kthm3][tj-1][ti+0] + shu[2][kthm3][tj+1][ti+0]))) + 8 *
+456: 	 (mu_kp1 * (shu[2][kthm1][tj-2][ti+0] - shu[2][kthm1][tj+2][ti+0] + 8 *
+457: 		    (-shu[2][kthm1][tj-1][ti+0] + shu[2][kthm1][tj+1][ti+0]))) -
+458: 	 (mu_kp2 * (shu[2][kthm0][tj-2][ti+0] - shu[2][kthm0][tj+2][ti+0] + 8 *
+459: 		    (-shu[2][kthm0][tj-1][ti+0] + shu[2][kthm0][tj+1][ti+0]))));
+460:
+461:       r3 += strx_i * strz_k * i144 *
+462: 	(mu_im2 * (shu[0][kthm4][tj+0][ti-2] - shu[0][kthm0][tj+0][ti-2] + 8 *
+463: 		   (-shu[0][kthm3][tj+0][ti-2] + shu[0][kthm1][tj+0][ti-2])) - 8 *
+464: 	 (mu_im1 * (shu[0][kthm4][tj+0][ti-1] - shu[0][kthm0][tj+0][ti-1] + 8 *
+465: 		    (-shu[0][kthm3][tj+0][ti-1] + shu[0][kthm1][tj+0][ti-1]))) + 8 *
+466: 	 (mu_ip1 * (shu[0][kthm4][tj+0][ti+1] - shu[0][kthm0][tj+0][ti+1] + 8 *
+467: 		    (-shu[0][kthm3][tj+0][ti+1] + shu[0][kthm1][tj+0][ti+1]))) -
+468: 	 (mu_ip2 * (shu[0][kthm4][tj+0][ti+2] - shu[0][kthm0][tj+0][ti+2] + 8 *
+469: 		    (-shu[0][kthm3][tj+0][ti+2] + shu[0][kthm1][tj+0][ti+2]))))
+470:
+471:         + stry_j  *strz_k*i144*
+472: 	(mu_jm2 * (shu[1][kthm4][tj-2][ti+0] - shu[1][kthm0][tj-2][ti+0] + 8 *
+473: 		   (- shu[1][kthm3][tj-2][ti+0]+shu[1][kthm1][tj-2][ti+0])) - 8 *
+474: 	 (mu_jm1 * (shu[1][kthm4][tj-1][ti+0] - shu[1][kthm0][tj-1][ti+0] + 8 *
+475: 		    (- shu[1][kthm3][tj-1][ti+0]+shu[1][kthm1][tj-1][ti+0]))) + 8 *
+476: 	 (mu_jp1 * (shu[1][kthm4][tj+1][ti+0] - shu[1][kthm0][tj+1][ti+0] + 8 *
+477: 		    (- shu[1][kthm3][tj+1][ti+0]+shu[1][kthm1][tj+1][ti+0]))) -
+478: 	 (mu_jp2 * (shu[1][kthm4][tj+2][ti+0] - shu[1][kthm0][tj+2][ti+0] + 8 *
+479: 		    (- shu[1][kthm3][tj+2][ti+0]+shu[1][kthm1][tj+2][ti+0]))))
+480:
+481:         + strx_i  *strz_k*i144*
+482: 	(la_km2*(shu[0][kthm4][tj+0][ti-2] - shu[0][kthm4][tj+0][ti+2] + 8 *
+483: 		 (- shu[0][kthm4][tj+0][ti-1]+shu[0][kthm4][tj+0][ti+1])) - 8*
+484: 	 (la_km1*(shu[0][kthm3][tj+0][ti-2] - shu[0][kthm3][tj+0][ti+2] + 8 *
+485: 		  (- shu[0][kthm3][tj+0][ti-1]+shu[0][kthm3][tj+0][ti+1]))) + 8*
+486: 	 (la_kp1*(shu[0][kthm1][tj+0][ti-2] - shu[0][kthm1][tj+0][ti+2] + 8 *
+487: 		  (- shu[0][kthm1][tj+0][ti-1]+shu[0][kthm1][tj+0][ti+1]))) -
+488: 	 (la_kp2*(shu[0][kthm0][tj+0][ti-2] - shu[0][kthm0][tj+0][ti+2] + 8 *
+489: 		  (- shu[0][kthm0][tj+0][ti-1]+shu[0][kthm0][tj+0][ti+1]))))
+490:
+491:         + stry_j  *strz_k*i144*
+492: 	(la_km2*(shu[1][kthm4][tj-2][ti+0] - shu[1][kthm4][tj+2][ti+0] + 8 *
+493: 		 (- shu[1][kthm4][tj-1][ti+0]+shu[1][kthm4][tj+1][ti+0])) - 8*
+494: 	 (la_km1*(shu[1][kthm3][tj-2][ti+0] - shu[1][kthm3][tj+2][ti+0] + 8 *
+495: 		  (- shu[1][kthm3][tj-1][ti+0]+shu[1][kthm3][tj+1][ti+0]))) + 8*
+496: 	 (la_kp1*(shu[1][kthm1][tj-2][ti+0] - shu[1][kthm1][tj+2][ti+0] + 8 *
+497: 		  (- shu[1][kthm1][tj-1][ti+0]+shu[1][kthm1][tj+1][ti+0]))) -
+498: 	 (la_kp2*(shu[1][kthm0][tj-2][ti+0] - shu[1][kthm0][tj+2][ti+0] + 8 *
+499: 		  (- shu[1][kthm0][tj-1][ti+0]+shu[1][kthm0][tj+1][ti+0]))));
+500:
+501:       if (pred) {
+502:
+503: 	int idx = k * nij + j * ni + i;
+504: 	float_sw4 fact = dt*dt / rho;
+505: 	up(0,idx) = 2 * shu[0][kthm2][tj][ti] - um0 + fact * (cof * r1 + fo0);
+506: 	up(1,idx) = 2 * shu[1][kthm2][tj][ti] - um1 + fact * (cof * r2 + fo1);
+507: 	up(2,idx) = 2 * shu[2][kthm2][tj][ti] - um2 + fact * (cof * r3 + fo2);
+508:       }
+509:       else {
+510:
+511: 	int idx = k * nij + j * ni + i;
+512: 	float_sw4 fact = dt*dt*dt*dt / (12 * rho);
+513: 	up(0,idx) = up0 + fact * (cof * r1 + fo0);
+514: 	up(1,idx) = up1 + fact * (cof * r2 + fo1);
+515: 	up(2,idx) = up2 + fact * (cof * r3 + fo2);
+516:       }
+517:
+518:       strz_km2 = strz_km1;
+519:       strz_km1 = strz_k;
+520:       strz_k = strz_kp1;
+521:       strz_kp1 = strz_kp2;
+522:
+523:       la_km2 = la_km1;
+524:       la_km1 = la_ijk;
+525:       la_ijk = la_kp1;
+526:       la_kp1 = la_kp2;
+527:
+528:       mu_km2 = mu_km1;
+529:       mu_km1 = mu_ijk;
+530:       mu_ijk = mu_kp1;
+531:       mu_kp1 = mu_kp2;
+532:
+533:     }
+534:
+535:     index += nij;
+536:
+537:   }
+538: }
+539:
+540: __global__ void addsgd4_SM (int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+541: 			 int ni, int nj, int nk,
+542: 			 float_sw4* __restrict__ a_up,
+543: 			 const float_sw4* __restrict__ a_u,
+544: 			 const float_sw4* __restrict__ a_um,
+545: 			 const float_sw4* __restrict__ a_rho,
+546: 			 const float_sw4* __restrict__ a_dcx,
+547: 			 const float_sw4* __restrict__ a_dcy,
+548: 			 const float_sw4* __restrict__ a_dcz,
+549: 			 const float_sw4* __restrict__ a_strx,
+550: 			 const float_sw4* __restrict__ a_stry,
+551: 			 const float_sw4* __restrict__ a_strz,
+552: 			 const float_sw4* __restrict__ a_cox,
+553: 			 const float_sw4* __restrict__ a_coy,
+554: 			 const float_sw4* __restrict__ a_coz,
+555: 			 const float_sw4 beta) {
+556:   int index;
+557:   float_sw4 u_km2[3], u_km1[3], old_up[3];
+558:
+559:   __shared__ float_sw4 shu[3][3][BY+4][BX+4];
+560:
+561:   const int i = threadIdx.x + blockIdx.x * BX;
+562:
+563:   const int j = jfirst + threadIdx.y + blockIdx.y * BY;
+564:
+565:   const int ti = threadIdx.x + 2;
+566:   const int tj = threadIdx.y + 2;
+567:
+568:   const int nij = ni * nj;
+569:   const int nijk = nij * nk;
+570:
+571:   int active=0, loader=0, loady2=0, loaderx2=0;
+572:
+573:   if (i+2 >= ifirst && i+2 <= ilast && j <= jlast)
+574:     active = 1;
+575:
+576:   if (i < ni && j-2 <= jlast+2) {
+577:     loader = 1;
+578:     if (threadIdx.x < 4 && i+BX < ni)
+579:       loaderx2 = 1;
+580:     if (threadIdx.y < 4 && j-2+BY <= jlast+2)
+581:       loady2 = 1;
+582:   }
+583:
+584:   if (active) {
+585:
+586:     int idx = (kfirst - 2) * nij + j * ni + i + 2;
+587:     for (int c=0; c<3; c++)
+588:       u_km2[c] = u(c,idx) - um(c,idx);
+589:     idx += nij;
+590:     for (int c=0; c<3; c++)
+591:       u_km1[c] = u(c,idx) - um(c,idx);
+592:   }
+593:
+594:   index = kfirst * nij + (j - 2) * ni + i;
+595:
+596:   for (int c=0; c<3; c++) {
+597:     if (loader) {
+598:       int idx = index;
+599:       shu[c][1][threadIdx.y][threadIdx.x] = u(c,idx) - um(c,idx);
+600:       shu[c][2][threadIdx.y][threadIdx.x] = u(c,idx+nij) - um(c,idx+nij);
+601:     }
+602:     if (loaderx2) {
+603:       int idx = index + BX;
+604:       shu[c][1][threadIdx.y][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+605:       shu[c][2][threadIdx.y][threadIdx.x+BX] = u(c,idx+nij) - um(c,idx+nij);
+606:     }
+607:     if (loady2) {
+608:       int idx = index + BY * ni;
+609:       shu[c][1][threadIdx.y+BY][threadIdx.x] = u(c,idx) - um(c,idx);
+610:       shu[c][2][threadIdx.y+BY][threadIdx.x] = u(c,idx+nij) - um(c,idx+nij);
+611:     }
+612:     if (loady2 && loaderx2) {
+613:       int idx = index + BY * ni + BX;
+614:       shu[c][1][threadIdx.y+BY][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+615:       shu[c][2][threadIdx.y+BY][threadIdx.x+BX] = u(c,idx+nij) - um(c,idx+nij);
+616:     }
+617:   }
+618:
+619:   index += 2 * nij;
+620:
+621:   for (int k=kfirst; k <= klast; k++) {
+622:     __syncthreads();
+623:
+624:     for (int c=0; c<3; c++) {
+625:       if (loader) {
+626:         for (int s=0; s<2; s++)
+627:           shu[c][s][threadIdx.y][threadIdx.x] = shu[c][s+1][threadIdx.y][threadIdx.x];
+628:         int idx = index;
+629:         shu[c][2][threadIdx.y][threadIdx.x] = u(c,idx) - um(c,idx);
+630:       }
+631:       if (loaderx2) {
+632:         for (int s=0; s<2; s++)
+633:           shu[c][s][threadIdx.y][threadIdx.x+BX] = shu[c][s+1][threadIdx.y][threadIdx.x+BX];
+634:         int idx = index + BX;
+635:         shu[c][2][threadIdx.y][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+636:       }
+637:       if (loady2) {
+638:         for (int s=0; s<2; s++)
+639:           shu[c][s][threadIdx.y+BY][threadIdx.x] = shu[c][s+1][threadIdx.y+BY][threadIdx.x];
+640:         int idx = index + BY * ni;
+641:         shu[c][2][threadIdx.y+BY][threadIdx.x] = u(c,idx) - um(c,idx);
+642:       }
+643:       if (loady2 && loaderx2) {
+644:         for (int s=0; s<2; s++)
+645:           shu[c][s][threadIdx.y+BY][threadIdx.x+BX] = shu[c][s+1][threadIdx.y+BY][threadIdx.x+BX];
+646:         int idx = index + BY * ni + BX;
+647:         shu[c][2][threadIdx.y+BY][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+648:       }
+649:     }
+650:
+651:     index += nij;
+652:     __syncthreads();
+653:
+654:     if (active) {
+655:       int idx = k * nij + j * ni + i + 2;
+656:       float_sw4 birho=beta/a_rho[idx];
+657:
+658:       for (int c=0; c<3; c++) {
+659:         up(c,idx) -= birho *
+660:           (
+661:            a_strx[i+2] * a_coy[j] * a_coz[k] * (a_rho[idx+1] * a_dcx[i+3] * (shu[c][0][tj][ti+2] - 2 * shu[c][0][tj][ti+1] + shu[c][0][tj][ti  ]) -
+662:                                      2 * a_rho[idx] * a_dcx[i+2] * (shu[c][0][tj][ti+1] - 2 * shu[c][0][tj][ti  ] + shu[c][0][tj][ti-1]) +
+663:                                      a_rho[idx-1] * a_dcx[i+1] * (shu[c][0][tj][ti  ] - 2 * shu[c][0][tj][ti-1] + shu[c][0][tj][ti-2])) +
+664:
+665:            a_stry[j] * a_cox[i+2] * a_coz[k] * (a_rho[idx+ni] * a_dcy[j+1] * (shu[c][0][tj+2][ti] - 2 * shu[c][0][tj+1][ti] + shu[c][0][tj  ][ti]) -
+666:                                      2 * a_rho[idx] * a_dcy[j] * (shu[c][0][tj+1][ti] - 2 * shu[c][0][tj  ][ti] + shu[c][0][tj-1][ti]) +
+667:                                      a_rho[idx-ni] * a_dcy[j-1] * (shu[c][0][tj  ][ti] - 2 * shu[c][0][tj-1][ti] + shu[c][0][tj-2][ti])) +
+668:
+669:            a_strz[k] * a_cox[i+2] * a_coy[j] * (a_rho[idx+nij] * a_dcz[k+1] * (shu[c][2][tj][ti] - 2 * shu[c][1][tj][ti] + shu[c][0][tj][ti]) -
+670:                                      2 * a_rho[idx] * a_dcz[k] * (shu[c][1][tj][ti] - 2 * shu[c][0][tj][ti] + u_km1[c]         ) +
+671:                                      a_rho[idx-nij] * a_dcz[k-1] * (shu[c][0][tj][ti] - 2 * u_km1[c]          + u_km2[c])));
+672:
+673:         u_km2[c] = u_km1[c];
+674:         u_km1[c] = shu[c][0][tj][ti];
+675:       }
+676:     }
+677:
+678:   }
+679: }
+```cpp```
+# End Source Code
+# Begin Performance Analysis
+
+### ROOFLINE SUMMARY (CONFIGURED):
+{
+  "BufferToHaloKernelX_dev_rev(double *, double *, double *, double *, int, int, int, int, int, int, int)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 18.3 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 2.09 active warps per scheduler, but only an average of 0.06 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, reduce the time the active warps are stalled by inspecting the top stall reasons on the Warp State Statistics and Source Counters sections.",
+    "The difference between calculated theoretical (100.0%) and measured achieved occupancy (12.3%) can be the result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on optimizing occupancy.",
+    "On average, each warp of this workload spends 29.9 cycles being stalled waiting for an immediate constant cache (IMC) miss. A read from constant memory costs one memory read from device memory only on a cache miss; otherwise, it just costs one read from the constant cache. Immediate constants are encoded into the SASS instruction as 'c[bank][offset]'. Accesses to different addresses by threads within a warp are serialized, thus the cost scales linearly with the number of unique addresses read by all threads within a warp. As such, the constant cache is best when threads in the same warp access only a few distinct locations. If all threads of a warp access the same location, then constant memory can be as fast as a register access. This stall type represents about 82.2% of the total average of 36.3 cycles between issuing two instructions.",
+    "One or more L2 Slices have a much higher number of active cycles than the average number of active cycles. Maximum instance value is 59.33% above the average, while the minimum instance value is 24.86% below the average."
+  ],
+  "BufferToHaloKernelY_dev_rev(double *, double *, double *, double *, int, int, int, int, int, int, int)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 17.3 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 1.82 active warps per scheduler, but only an average of 0.07 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, reduce the time the active warps are stalled by inspecting the top stall reasons on the Warp State Statistics and Source Counters sections.",
+    "The difference between calculated theoretical (100.0%) and measured achieved occupancy (12.3%) can be the result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on optimizing occupancy.",
+    "On average, each warp of this workload spends 30.2 cycles being stalled waiting for an immediate constant cache (IMC) miss. A read from constant memory costs one memory read from device memory only on a cache miss; otherwise, it just costs one read from the constant cache. Immediate constants are encoded into the SASS instruction as 'c[bank][offset]'. Accesses to different addresses by threads within a warp are serialized, thus the cost scales linearly with the number of unique addresses read by all threads within a warp. As such, the constant cache is best when threads in the same warp access only a few distinct locations. If all threads of a warp access the same location, then constant memory can be as fast as a register access. This stall type represents about 87.4% of the total average of 34.5 cycles between issuing two instructions.",
+    "On average, each warp of this workload spends 10.7 cycles being stalled waiting to be selected to fetch an instruction or waiting on an instruction cache miss. A high number of warps not having an instruction fetched is typical for very short kernels with less than one full wave of work in the grid. Excessively jumping across large blocks of assembly code can also lead to more warps stalled for this reason, if this causes misses in the instruction cache. See also the related Branch Resolving state. This stall type represents about 33.9% of the total average of 31.7 cycles between issuing two instructions."
+  ],
+  "HaloToBufferKernelX_dev_rev(double *, double *, double *, double *, int, int, int, int, int, int, int)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 17.4 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 1.98 active warps per scheduler, but only an average of 0.07 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, reduce the time the active warps are stalled by inspecting the top stall reasons on the Warp State Statistics and Source Counters sections.",
+    "The difference between calculated theoretical (100.0%) and measured achieved occupancy (12.3%) can be the result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on optimizing occupancy.",
+    "On average, each warp of this workload spends 26.2 cycles being stalled waiting for an immediate constant cache (IMC) miss. A read from constant memory costs one memory read from device memory only on a cache miss; otherwise, it just costs one read from the constant cache. Immediate constants are encoded into the SASS instruction as 'c[bank][offset]'. Accesses to different addresses by threads within a warp are serialized, thus the cost scales linearly with the number of unique addresses read by all threads within a warp. As such, the constant cache is best when threads in the same warp access only a few distinct locations. If all threads of a warp access the same location, then constant memory can be as fast as a register access. This stall type represents about 75.6% of the total average of 34.6 cycles between issuing two instructions.",
+    "On average, each warp of this workload spends 11.4 cycles being stalled waiting to be selected to fetch an instruction or waiting on an instruction cache miss. A high number of warps not having an instruction fetched is typical for very short kernels with less than one full wave of work in the grid. Excessively jumping across large blocks of assembly code can also lead to more warps stalled for this reason, if this causes misses in the instruction cache. See also the related Branch Resolving state. This stall type represents about 33.0% of the total average of 34.6 cycles between issuing two instructions."
+  ],
+  "HaloToBufferKernelY_dev_rev(double *, double *, double *, double *, int, int, int, int, int, int, int)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 21.1 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 1.55 active warps per scheduler, but only an average of 0.06 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, reduce the time the active warps are stalled by inspecting the top stall reasons on the Warp State Statistics and Source Counters sections.",
+    "The difference between calculated theoretical (100.0%) and measured achieved occupancy (12.3%) can be the result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on optimizing occupancy.",
+    "On average, each warp of this workload spends 29.5 cycles being stalled waiting for an immediate constant cache (IMC) miss. A read from constant memory costs one memory read from device memory only on a cache miss; otherwise, it just costs one read from the constant cache. Immediate constants are encoded into the SASS instruction as 'c[bank][offset]'. Accesses to different addresses by threads within a warp are serialized, thus the cost scales linearly with the number of unique addresses read by all threads within a warp. As such, the constant cache is best when threads in the same warp access only a few distinct locations. If all threads of a warp access the same location, then constant memory can be as fast as a register access. This stall type represents about 84.9% of the total average of 34.8 cycles between issuing two instructions.",
+    "On average, each warp of this workload spends 12.3 cycles being stalled waiting to be selected to fetch an instruction or waiting on an instruction cache miss. A high number of warps not having an instruction fetched is typical for very short kernels with less than one full wave of work in the grid. Excessively jumping across large blocks of assembly code can also lead to more warps stalled for this reason, if this causes misses in the instruction cache. See also the related Branch Resolving state. This stall type represents about 37.8% of the total average of 32.6 cycles between issuing two instructions."
+  ],
+  "dpdmt_dev(int, int, int, int, int, int, double *, double *, double *, double *, double, int)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "Out of the 105909152.0 bytes sent to the L2 Compression unit only 0.00% were successfully compressed. To increase this success rate, consider marking only those memory regions as compressible that contain the most zero values and/or expose the most homogeneous values.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 7.2 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 14.41 active warps per scheduler, but only an average of 0.22 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, avoid possible load imbalances due to highly different execution durations per warp. Reducing stalls indicated on the Warp State Statistics and Source Counters sections can help, too.",
+    "On average, each warp of this workload spends 98.4 cycles being stalled waiting for a scoreboard dependency on a L1TEX (local, global, surface, texture) operation. Find the instruction producing the data being waited upon to identify the culprit. To reduce the number of cycles waiting on L1TEX data accesses verify the memory access patterns are optimal for the target architecture, attempt to increase cache hit rates by increasing data locality (coalescing), or by changing the cache configuration. Consider moving frequently used data to shared memory. This stall type represents about 95.1% of the total average of 103.5 cycles between issuing two instructions.",
+    "The difference between calculated theoretical (100.0%) and measured achieved occupancy (89.9%) can be the result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on optimizing occupancy."
+  ],
+  "forcing_dev(double, Sarray *, int, GridPointSource *, int, int *, int, bool)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 2.1 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 2.99 active warps per scheduler, but only an average of 0.69 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, reduce the time the active warps are stalled by inspecting the top stall reasons on the Warp State Statistics and Source Counters sections.",
+    "The 4.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the hardware maximum of 16. This kernel's theoretical occupancy (25.0%) is limited by the number of required registers.",
+    "One or more L1 Slices have a much higher number of active cycles than the average number of active cycles. Maximum instance value is 45.70% above the average, while the minimum instance value is 11.51% below the average.",
+    "This kernel has uncoalesced global accesses resulting in a total of 2636 excessive sectors (67% of the total 3947 sectors). Check the L2 Theoretical Sectors Global Excessive table for the primary source locations. The CUDA Programming Guide (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses) has additional information on reducing uncoalesced device memory accesses."
+  ],
+  "init_forcing_dev(GridPointSource *, int)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "The difference between calculated theoretical (100.0%) and measured achieved occupancy (17.9%) can be the result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on optimizing occupancy.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 4.1 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 3.04 active warps per scheduler, but only an average of 0.30 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, reduce the time the active warps are stalled by inspecting the top stall reasons on the Warp State Statistics and Source Counters sections.",
+    "This kernel has uncoalesced global accesses resulting in a total of 2619 excessive sectors (76% of the total 3456 sectors). Check the L2 Theoretical Sectors Global Excessive table for the primary source locations. The CUDA Programming Guide (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses) has additional information on reducing uncoalesced device memory accesses.",
+    "One or more SMSPs have a much higher number of active cycles than the average number of active cycles. Maximum instance value is 23.52% above the average, while the minimum instance value is 10.20% below the average."
+  ],
+  "void addsgd4_SM<1>(int, int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 7.5 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 1.99 active warps per scheduler, but only an average of 0.15 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, avoid possible load imbalances due to highly different execution durations per warp. Reducing stalls indicated on the Warp State Statistics and Source Counters sections can help, too.",
+    "The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the hardware maximum of 16. This kernel's theoretical occupancy (12.5%) is limited by the number of required registers, and the required amount of shared memory.",
+    "On average, each warp of this workload spends 8.3 cycles being stalled waiting for a scoreboard dependency on a L1TEX (local, global, surface, texture) operation. Find the instruction producing the data being waited upon to identify the culprit. To reduce the number of cycles waiting on L1TEX data accesses verify the memory access patterns are optimal for the target architecture, attempt to increase cache hit rates by increasing data locality (coalescing), or by changing the cache configuration. Consider moving frequently used data to shared memory. This stall type represents about 56.8% of the total average of 14.6 cycles between issuing two instructions.",
+    "A wave of thread blocks is defined as the maximum number of blocks that can be executed in parallel on the target GPU. The number of blocks in a wave depends on the number of multiprocessors and the theoretical occupancy of the kernel. This kernel launch results in 1 full waves and a partial wave of 55 thread blocks. Under the assumption of a uniform execution duration of all thread blocks, this partial wave may account for up to 50.0% of the total runtime of this kernel. Try launching a grid with no partial wave. The overall impact of this tail effect also lessens with the number of full waves executed for a grid. See the Hardware Model (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-hw-model) description for more details on launch configurations."
+  ],
+  "void addsgd4_X<1>(int, int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 11.0 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 2.97 active warps per scheduler, but only an average of 0.11 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, avoid possible load imbalances due to highly different execution durations per warp. Reducing stalls indicated on the Warp State Statistics and Source Counters sections can help, too.",
+    "On average, each warp of this workload spends 24.4 cycles being stalled waiting for a scoreboard dependency on a L1TEX (local, global, surface, texture) operation. Find the instruction producing the data being waited upon to identify the culprit. To reduce the number of cycles waiting on L1TEX data accesses verify the memory access patterns are optimal for the target architecture, attempt to increase cache hit rates by increasing data locality (coalescing), or by changing the cache configuration. Consider moving frequently used data to shared memory. This stall type represents about 74.6% of the total average of 32.8 cycles between issuing two instructions.",
+    "The 3.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the hardware maximum of 16. This kernel's theoretical occupancy (18.8%) is limited by the number of required registers, and the required amount of shared memory.",
+    "This kernel has uncoalesced global accesses resulting in a total of 676103 excessive sectors (44% of the total 1536399 sectors). Check the L2 Theoretical Sectors Global Excessive table for the primary source locations. The CUDA Programming Guide (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses) has additional information on reducing uncoalesced device memory accesses."
+  ],
+  "void addsgd4_Y<1>(int, int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "On average, each warp of this workload spends 12.0 cycles being stalled waiting for a scoreboard dependency on a L1TEX (local, global, surface, texture) operation. Find the instruction producing the data being waited upon to identify the culprit. To reduce the number of cycles waiting on L1TEX data accesses verify the memory access patterns are optimal for the target architecture, attempt to increase cache hit rates by increasing data locality (coalescing), or by changing the cache configuration. Consider moving frequently used data to shared memory. This stall type represents about 65.5% of the total average of 18.3 cycles between issuing two instructions.",
+    "The 5.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the hardware maximum of 16. This kernel's theoretical occupancy (31.2%) is limited by the number of required registers, and the required amount of shared memory.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 7.0 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 2.62 active warps per scheduler, but only an average of 0.17 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, reduce the time the active warps are stalled by inspecting the top stall reasons on the Warp State Statistics and Source Counters sections.",
+    "The difference between calculated theoretical (31.2%) and measured achieved occupancy (16.2%) can be the result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on optimizing occupancy."
+  ],
+  "void bcfortsg<1>(int, int, int, int, int, int, int *, int, int, int, double *, double, boundaryConditionType *, double *, double *, double, double *, double *, double *, double *, double *, double *, double, double, double, double *, double *)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the hardware maximum of 16. This kernel's theoretical occupancy (12.5%) is limited by the number of required registers.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 5.8 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 1.92 active warps per scheduler, but only an average of 0.22 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, avoid possible load imbalances due to highly different execution durations per warp. Reducing stalls indicated on the Warp State Statistics and Source Counters sections can help, too.",
+    "A wave of thread blocks is defined as the maximum number of blocks that can be executed in parallel on the target GPU. The number of blocks in a wave depends on the number of multiprocessors and the theoretical occupancy of the kernel. This kernel launch results in 1 full waves and a partial wave of 55 thread blocks. Under the assumption of a uniform execution duration of all thread blocks, this partial wave may account for up to 50.0% of the total runtime of this kernel. Try launching a grid with no partial wave. The overall impact of this tail effect also lessens with the number of full waves executed for a grid. See the Hardware Model (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-hw-model) description for more details on launch configurations.",
+    "On average, each warp of this workload spends 5.2 cycles being stalled waiting for a scoreboard dependency on a L1TEX (local, global, surface, texture) operation. Find the instruction producing the data being waited upon to identify the culprit. To reduce the number of cycles waiting on L1TEX data accesses verify the memory access patterns are optimal for the target architecture, attempt to increase cache hit rates by increasing data locality (coalescing), or by changing the cache configuration. Consider moving frequently used data to shared memory. This stall type represents about 46.5% of the total average of 11.2 cycles between issuing two instructions."
+  ],
+  "void rhs4_Kboundary<1, 0, 1>(int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double, double)": [
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 3.9 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 2.77 active warps per scheduler, but only an average of 0.38 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, avoid possible load imbalances due to highly different execution durations per warp. Reducing stalls indicated on the Warp State Statistics and Source Counters sections can help, too.",
+    "The 3.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the hardware maximum of 16. This kernel's theoretical occupancy (18.8%) is limited by the number of required registers.",
+    "On average, each warp of this workload spends 4.3 cycles being stalled waiting for a scoreboard dependency on a L1TEX (local, global, surface, texture) operation. Find the instruction producing the data being waited upon to identify the culprit. To reduce the number of cycles waiting on L1TEX data accesses verify the memory access patterns are optimal for the target architecture, attempt to increase cache hit rates by increasing data locality (coalescing), or by changing the cache configuration. Consider moving frequently used data to shared memory. This stall type represents about 40.6% of the total average of 10.7 cycles between issuing two instructions.",
+    "This kernel has uncoalesced global accesses resulting in a total of 599784 excessive sectors (19% of the total 3169002 sectors). Check the L2 Theoretical Sectors Global Excessive table for the primary source locations. The CUDA Programming Guide (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses) has additional information on reducing uncoalesced device memory accesses.",
+    "Out of the 6974720.0 bytes sent to the L2 Compression unit only 0.00% were successfully compressed. To increase this success rate, consider marking only those memory regions as compressible that contain the most zero values and/or expose the most homogeneous values."
+  ],
+  "void rhs4_Kboundary<1, 1, 1>(int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double, double)": [
+    "The 3.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the hardware maximum of 16. This kernel's theoretical occupancy (18.8%) is limited by the number of required registers.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 3.4 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 2.80 active warps per scheduler, but only an average of 0.42 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, avoid possible load imbalances due to highly different execution durations per warp. Reducing stalls indicated on the Warp State Statistics and Source Counters sections can help, too.",
+    "On average, each warp of this workload spends 3.4 cycles being stalled waiting for a scoreboard dependency on a L1TEX (local, global, surface, texture) operation. Find the instruction producing the data being waited upon to identify the culprit. To reduce the number of cycles waiting on L1TEX data accesses verify the memory access patterns are optimal for the target architecture, attempt to increase cache hit rates by increasing data locality (coalescing), or by changing the cache configuration. Consider moving frequently used data to shared memory. This stall type represents about 35.5% of the total average of 9.5 cycles between issuing two instructions.",
+    "This kernel has uncoalesced global accesses resulting in a total of 599784 excessive sectors (19% of the total 3169002 sectors). Check the L2 Theoretical Sectors Global Excessive table for the primary source locations. The CUDA Programming Guide (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses) has additional information on reducing uncoalesced device memory accesses.",
+    "Out of the 6983616.0 bytes sent to the L2 Compression unit only 0.00% were successfully compressed. To increase this success rate, consider marking only those memory regions as compressible that contain the most zero values and/or expose the most homogeneous values."
+  ],
+  "void rhs4_X<1, 0>(int, int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double, double)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "The 3.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the hardware maximum of 16. This kernel's theoretical occupancy (18.8%) is limited by the number of required registers, and the required amount of shared memory.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 7.3 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 2.85 active warps per scheduler, but only an average of 0.25 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, avoid possible load imbalances due to highly different execution durations per warp. Reducing stalls indicated on the Warp State Statistics and Source Counters sections can help, too.",
+    "On average, each warp of this workload spends 12.2 cycles being stalled waiting for a scoreboard dependency on a L1TEX (local, global, surface, texture) operation. Find the instruction producing the data being waited upon to identify the culprit. To reduce the number of cycles waiting on L1TEX data accesses verify the memory access patterns are optimal for the target architecture, attempt to increase cache hit rates by increasing data locality (coalescing), or by changing the cache configuration. Consider moving frequently used data to shared memory. This stall type represents about 59.8% of the total average of 20.5 cycles between issuing two instructions.",
+    "This kernel has uncoalesced global accesses resulting in a total of 540112 excessive sectors (43% of the total 1253732 sectors). Check the L2 Theoretical Sectors Global Excessive table for the primary source locations. The CUDA Programming Guide (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses) has additional information on reducing uncoalesced device memory accesses."
+  ],
+  "void rhs4_X<1, 1>(int, int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double, double)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 7.5 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 2.91 active warps per scheduler, but only an average of 0.23 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, avoid possible load imbalances due to highly different execution durations per warp. Reducing stalls indicated on the Warp State Statistics and Source Counters sections can help, too.",
+    "The 3.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the hardware maximum of 16. This kernel's theoretical occupancy (18.8%) is limited by the number of required registers, and the required amount of shared memory.",
+    "On average, each warp of this workload spends 13.2 cycles being stalled waiting for a scoreboard dependency on a L1TEX (local, global, surface, texture) operation. Find the instruction producing the data being waited upon to identify the culprit. To reduce the number of cycles waiting on L1TEX data accesses verify the memory access patterns are optimal for the target architecture, attempt to increase cache hit rates by increasing data locality (coalescing), or by changing the cache configuration. Consider moving frequently used data to shared memory. This stall type represents about 60.5% of the total average of 21.8 cycles between issuing two instructions.",
+    "The memory access pattern for local stores to L2 might not be optimal. On average, only 1.0 of the 32 bytes transmitted per sector are utilized by each thread. This applies to the 99.6% of sectors missed in L1TEX. This could possibly be caused by a stride between threads. Check the Source Counters section for uncoalesced local stores."
+  ],
+  "void rhs4_Y<1, 0>(int, int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double, double)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the hardware maximum of 16. This kernel's theoretical occupancy (12.5%) is limited by the number of required registers.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 5.9 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 1.68 active warps per scheduler, but only an average of 0.19 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, avoid possible load imbalances due to highly different execution durations per warp. Reducing stalls indicated on the Warp State Statistics and Source Counters sections can help, too.",
+    "On average, each warp of this workload spends 5.9 cycles being stalled waiting for a scoreboard dependency on a L1TEX (local, global, surface, texture) operation. Find the instruction producing the data being waited upon to identify the culprit. To reduce the number of cycles waiting on L1TEX data accesses verify the memory access patterns are optimal for the target architecture, attempt to increase cache hit rates by increasing data locality (coalescing), or by changing the cache configuration. Consider moving frequently used data to shared memory. This stall type represents about 59.6% of the total average of 10.0 cycles between issuing two instructions.",
+    "A wave of thread blocks is defined as the maximum number of blocks that can be executed in parallel on the target GPU. The number of blocks in a wave depends on the number of multiprocessors and the theoretical occupancy of the kernel. This kernel launch results in 1 full waves and a partial wave of 85 thread blocks. Under the assumption of a uniform execution duration of all thread blocks, this partial wave may account for up to 50.0% of the total runtime of this kernel. Try launching a grid with no partial wave. The overall impact of this tail effect also lessens with the number of full waves executed for a grid. See the Hardware Model (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-hw-model) description for more details on launch configurations."
+  ],
+  "void rhs4_Y<1, 1>(int, int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double, double)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 5.1 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 1.71 active warps per scheduler, but only an average of 0.22 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, avoid possible load imbalances due to highly different execution durations per warp. Reducing stalls indicated on the Warp State Statistics and Source Counters sections can help, too.",
+    "The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the hardware maximum of 16. This kernel's theoretical occupancy (12.5%) is limited by the number of required registers.",
+    "On average, each warp of this workload spends 4.7 cycles being stalled waiting for a scoreboard dependency on a L1TEX (local, global, surface, texture) operation. Find the instruction producing the data being waited upon to identify the culprit. To reduce the number of cycles waiting on L1TEX data accesses verify the memory access patterns are optimal for the target architecture, attempt to increase cache hit rates by increasing data locality (coalescing), or by changing the cache configuration. Consider moving frequently used data to shared memory. This stall type represents about 53.8% of the total average of 8.7 cycles between issuing two instructions.",
+    "A wave of thread blocks is defined as the maximum number of blocks that can be executed in parallel on the target GPU. The number of blocks in a wave depends on the number of multiprocessors and the theoretical occupancy of the kernel. This kernel launch results in 1 full waves and a partial wave of 85 thread blocks. Under the assumption of a uniform execution duration of all thread blocks, this partial wave may account for up to 50.0% of the total runtime of this kernel. Try launching a grid with no partial wave. The overall impact of this tail effect also lessens with the number of full waves executed for a grid. See the Hardware Model (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-hw-model) description for more details on launch configurations."
+  ],
+  "void rhs4_v2<1, 0>(int, int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double, double)": [
+    "The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the hardware maximum of 16. This kernel's theoretical occupancy (12.5%) is limited by the number of required registers, and the required amount of shared memory.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 3.5 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 2.00 active warps per scheduler, but only an average of 0.40 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, avoid possible load imbalances due to highly different execution durations per warp. Reducing stalls indicated on the Warp State Statistics and Source Counters sections can help, too.",
+    "A wave of thread blocks is defined as the maximum number of blocks that can be executed in parallel on the target GPU. The number of blocks in a wave depends on the number of multiprocessors and the theoretical occupancy of the kernel. This kernel launch results in 1 full waves and a partial wave of 55 thread blocks. Under the assumption of a uniform execution duration of all thread blocks, this partial wave may account for up to 50.0% of the total runtime of this kernel. Try launching a grid with no partial wave. The overall impact of this tail effect also lessens with the number of full waves executed for a grid. See the Hardware Model (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-hw-model) description for more details on launch configurations.",
+    "On average, each warp of this workload spends 2.1 cycles being stalled waiting for a scoreboard dependency on a L1TEX (local, global, surface, texture) operation. Find the instruction producing the data being waited upon to identify the culprit. To reduce the number of cycles waiting on L1TEX data accesses verify the memory access patterns are optimal for the target architecture, attempt to increase cache hit rates by increasing data locality (coalescing), or by changing the cache configuration. Consider moving frequently used data to shared memory. This stall type represents about 30.9% of the total average of 6.9 cycles between issuing two instructions.",
+    "One or more SMSPs have a much lower number of active cycles than the average number of active cycles. Maximum instance value is 27.11% above the average, while the minimum instance value is 30.84% below the average."
+  ],
+  "void rhs4_v2<1, 1>(int, int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double, double)": [
+    "The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the hardware maximum of 16. This kernel's theoretical occupancy (12.5%) is limited by the number of required registers, and the required amount of shared memory.",
+    "Every scheduler is capable of issuing one instruction per cycle, but for this workload each scheduler only issues an instruction every 3.4 cycles. This might leave hardware resources underutilized and may lead to less optimal performance. Out of the maximum of 16 warps per scheduler, this workload allocates an average of 2.00 active warps per scheduler, but only an average of 0.41 warps were eligible per cycle. Eligible warps are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible warp results in no instruction being issued and the issue slot remains unused. To increase the number of eligible warps, avoid possible load imbalances due to highly different execution durations per warp. Reducing stalls indicated on the Warp State Statistics and Source Counters sections can help, too.",
+    "A wave of thread blocks is defined as the maximum number of blocks that can be executed in parallel on the target GPU. The number of blocks in a wave depends on the number of multiprocessors and the theoretical occupancy of the kernel. This kernel launch results in 1 full waves and a partial wave of 55 thread blocks. Under the assumption of a uniform execution duration of all thread blocks, this partial wave may account for up to 50.0% of the total runtime of this kernel. Try launching a grid with no partial wave. The overall impact of this tail effect also lessens with the number of full waves executed for a grid. See the Hardware Model (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-hw-model) description for more details on launch configurations.",
+    "On average, each warp of this workload spends 2.1 cycles being stalled waiting for a scoreboard dependency on a L1TEX (local, global, surface, texture) operation. Find the instruction producing the data being waited upon to identify the culprit. To reduce the number of cycles waiting on L1TEX data accesses verify the memory access patterns are optimal for the target architecture, attempt to increase cache hit rates by increasing data locality (coalescing), or by changing the cache configuration. Consider moving frequently used data to shared memory. This stall type represents about 31.2% of the total average of 6.7 cycles between issuing two instructions.",
+    "One or more SMs have a much lower number of active cycles than the average number of active cycles. Maximum instance value is 27.26% above the average, while the minimum instance value is 31.18% below the average."
+  ]
+}
+
+# End Performance Analysis
+
+
+# Begin H100 Optimization Guidance
+Optimize specifically for NVIDIA H100 (Hopper) by targeting L2/cache reuse, HBM3 bandwidth, and Tensor Core throughput. Prioritize tiling and data locality: make global accesses coalesced/contiguous, reuse data from registers/shared memory/L2, and reduce redundant global traffic. Use Hopper async pipelines to hide memory latency: stage global→shared with cp.async / cuda::memcpy_async using double/triple buffering so loads overlap compute; keep the pipeline full instead of blocking on loads. If compute is matrix/attention-like, map work to Tensor Cores (WMMA/CUTLASS/cuBLASLt) and use mixed precision (FP16/BF16/TF32, FP8 when numerically safe) to increase throughput. Tune launch configuration to avoid occupancy cliffs: pick block sizes that sustain high occupancy without excessive register pressure or shared-memory usage; avoid large per-thread local arrays that cause spills. Reduce warp inefficiency: minimize divergence, expensive atomics, and unnecessary __syncthreads(); prefer warp-level primitives and cooperative groups where applicable. If memory-bound, reduce passes and consider fusion/batching to increase L2 hit rate; if compute-bound, increase ILP, unroll judiciously, and favor FMA-friendly instruction patterns.
+# End H100 Optimization Guidance
+
+# Begin Entrypoint Guardrails
+Entrypoint guardrails:
+1. The source does not contain a main() definition. Do NOT introduce one.
+2. Do NOT add wrapper executables, test harnesses, helper mains, or alternate standalone programs.
+3. Keep the existing top-level program structure intact; only optimize within the existing file structure.
+4. Do NOT change externally referenced function names or break linkage between existing declarations and definitions.
+# End Entrypoint Guardrails
+# Instructions
+You must optimize the source code provided above using only the performance data provided above. 
+
+Optimize the following HPC code for execution time. You must define mathematical preconditions and postconditions, provide explicit loop invariants to guarantee semantic equivalence, and provide a logical proof showing why the invariants remain unbroken after your structural optimization.
+Can you give me the fixed optimized code that will replace the full source code including headers and main function body?
+2. Do not add line numbers to the generated code. 
+3. Do not rename or duplicate any kernel or function.
+4. Do not change any function signatures.
+5. Preserve the existing entry-point structure exactly. If the file already has main(), keep exactly one equivalent main(); if it does not, do not add one.
+6. Do not add duplicate definitions for main or for any externally linked function.
+7. Do not turn declarations into disconnected definitions or break declaration/definition linkage.
+5. Use the performance analysis reference number(s) to guide your changes.
+8. Return:
+   (a) the full source code including the optimized kernels inside ``` block (starts with ``` and ends with ``` )
+   (b) optimizations list = [{'lines': [...], 'reason': '...'}]
+   (c) suggested_but_not_applied list = [{'lines': [...], 'reason': '...'}]
+9. Do not generate more than one copy of the same kernel.
+10. Do not invent any new kernels or placeholder code.
+
+ONLY respond with the updated code and two structured lists. No explanation, no notes, no markdown titles. Follow this format exactly.

@@ -1,0 +1,234 @@
+# Begin Source Code
+```cpp```
+1: __global__ void addsgd4_SM (int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+2:                          int ni, int nj, int nk,
+3:                          float_sw4* __restrict__ a_up,
+4:                          const float_sw4* __restrict__ a_u,
+5:                          const float_sw4* __restrict__ a_um,
+6:                          const float_sw4* __restrict__ a_rho,
+7:                          const float_sw4* __restrict__ a_dcx,
+8:                          const float_sw4* __restrict__ a_dcy,
+9:                          const float_sw4* __restrict__ a_dcz,
+10:                          const float_sw4* __restrict__ a_strx,
+11:                          const float_sw4* __restrict__ a_stry,
+12:                          const float_sw4* __restrict__ a_strz,
+13:                          const float_sw4* __restrict__ a_cox,
+14:                          const float_sw4* __restrict__ a_coy,
+15:                          const float_sw4* __restrict__ a_coz,
+16:                          const float_sw4 beta) {
+17:   int index;
+18:   float_sw4 u_km2[3], u_km1[3], old_up[3];
+19:
+20:   __shared__ float_sw4 shu[3][3][BY+4][BX+4];
+21:
+22:   const int i = threadIdx.x + blockIdx.x * BX;
+23:
+24:   const int j = jfirst + threadIdx.y + blockIdx.y * BY;
+25:
+26:   const int ti = threadIdx.x + 2;
+27:   const int tj = threadIdx.y + 2;
+28:
+29:   const int nij = ni * nj;
+30:   const int nijk = nij * nk;
+31:
+32:   int active=0, loader=0, loady2=0, loaderx2=0;
+33:
+34:   if (i+2 >= ifirst && i+2 <= ilast && j <= jlast)
+35:     active = 1;
+36:
+37:   if (i < ni && j-2 <= jlast+2) {
+38:     loader = 1;
+39:     if (threadIdx.x < 4 && i+BX < ni)
+40:       loaderx2 = 1;
+41:     if (threadIdx.y < 4 && j-2+BY <= jlast+2)
+42:       loady2 = 1;
+43:   }
+44:
+45:   if (active) {
+46:
+47:     int idx = (kfirst - 2) * nij + j * ni + i + 2;
+48:     for (int c=0; c<3; c++)
+49:       u_km2[c] = u(c,idx) - um(c,idx);
+50:     idx += nij;
+51:     for (int c=0; c<3; c++)
+52:       u_km1[c] = u(c,idx) - um(c,idx);
+53:   }
+54:
+55:   index = kfirst * nij + (j - 2) * ni + i;
+56:
+57:   for (int c=0; c<3; c++) {
+58:     if (loader) {
+59:       int idx = index;
+60:       shu[c][1][threadIdx.y][threadIdx.x] = u(c,idx) - um(c,idx);
+61:       shu[c][2][threadIdx.y][threadIdx.x] = u(c,idx+nij) - um(c,idx+nij);
+62:     }
+63:     if (loaderx2) {
+64:       int idx = index + BX;
+65:       shu[c][1][threadIdx.y][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+66:       shu[c][2][threadIdx.y][threadIdx.x+BX] = u(c,idx+nij) - um(c,idx+nij);
+67:     }
+68:     if (loady2) {
+69:       int idx = index + BY * ni;
+70:       shu[c][1][threadIdx.y+BY][threadIdx.x] = u(c,idx) - um(c,idx);
+71:       shu[c][2][threadIdx.y+BY][threadIdx.x] = u(c,idx+nij) - um(c,idx+nij);
+72:     }
+73:     if (loady2 && loaderx2) {
+74:       int idx = index + BY * ni + BX;
+75:       shu[c][1][threadIdx.y+BY][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+76:       shu[c][2][threadIdx.y+BY][threadIdx.x+BX] = u(c,idx+nij) - um(c,idx+nij);
+77:     }
+78:   }
+79:
+80:   index += 2 * nij;
+81:
+82:   for (int k=kfirst; k <= klast; k++) {
+83:     __syncthreads();
+84:
+85:     for (int c=0; c<3; c++) {
+86:       if (loader) {
+87:         for (int s=0; s<2; s++)
+88:           shu[c][s][threadIdx.y][threadIdx.x] = shu[c][s+1][threadIdx.y][threadIdx.x];
+89:         int idx = index;
+90:         shu[c][2][threadIdx.y][threadIdx.x] = u(c,idx) - um(c,idx);
+91:       }
+92:       if (loaderx2) {
+93:         for (int s=0; s<2; s++)
+94:           shu[c][s][threadIdx.y][threadIdx.x+BX] = shu[c][s+1][threadIdx.y][threadIdx.x+BX];
+95:         int idx = index + BX;
+96:         shu[c][2][threadIdx.y][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+97:       }
+98:       if (loady2) {
+99:         for (int s=0; s<2; s++)
+100:           shu[c][s][threadIdx.y+BY][threadIdx.x] = shu[c][s+1][threadIdx.y+BY][threadIdx.x];
+101:         int idx = index + BY * ni;
+102:         shu[c][2][threadIdx.y+BY][threadIdx.x] = u(c,idx) - um(c,idx);
+103:       }
+104:       if (loady2 && loaderx2) {
+105:         for (int s=0; s<2; s++)
+106:           shu[c][s][threadIdx.y+BY][threadIdx.x+BX] = shu[c][s+1][threadIdx.y+BY][threadIdx.x+BX];
+107:         int idx = index + BY * ni + BX;
+108:         shu[c][2][threadIdx.y+BY][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+109:       }
+110:     }
+111:
+112:     index += nij;
+113:     __syncthreads();
+114:
+115:     if (active) {
+116:       int idx = k * nij + j * ni + i + 2;
+117:       float_sw4 birho=beta/a_rho[idx];
+118:
+119:       for (int c=0; c<3; c++) {
+120:         up(c,idx) -= birho *
+121:           (
+122:            a_strx[i+2] * a_coy[j] * a_coz[k] * (a_rho[idx+1] * a_dcx[i+3] * (shu[c][0][tj][ti+2] - 2 * shu[c][0][tj][ti+1] + shu[c][0][tj][ti  ]) -
+123:                                      2 * a_rho[idx] * a_dcx[i+2] * (shu[c][0][tj][ti+1] - 2 * shu[c][0][tj][ti  ] + shu[c][0][tj][ti-1]) +
+124:                                      a_rho[idx-1] * a_dcx[i+1] * (shu[c][0][tj][ti  ] - 2 * shu[c][0][tj][ti-1] + shu[c][0][tj][ti-2])) +
+125:
+126:            a_stry[j] * a_cox[i+2] * a_coz[k] * (a_rho[idx+ni] * a_dcy[j+1] * (shu[c][0][tj+2][ti] - 2 * shu[c][0][tj+1][ti] + shu[c][0][tj  ][ti]) -
+127:                                      2 * a_rho[idx] * a_dcy[j] * (shu[c][0][tj+1][ti] - 2 * shu[c][0][tj  ][ti] + shu[c][0][tj-1][ti]) +
+128:                                      a_rho[idx-ni] * a_dcy[j-1] * (shu[c][0][tj  ][ti] - 2 * shu[c][0][tj-1][ti] + shu[c][0][tj-2][ti])) +
+129:
+130:            a_strz[k] * a_cox[i+2] * a_coy[j] * (a_rho[idx+nij] * a_dcz[k+1] * (shu[c][2][tj][ti] - 2 * shu[c][1][tj][ti] + shu[c][0][tj][ti]) -
+131:                                      2 * a_rho[idx] * a_dcz[k] * (shu[c][1][tj][ti] - 2 * shu[c][0][tj][ti] + u_km1[c]         ) +
+132:                                      a_rho[idx-nij] * a_dcz[k-1] * (shu[c][0][tj][ti] - 2 * u_km1[c]          + u_km2[c])));
+133:
+134:         u_km2[c] = u_km1[c];
+135:         u_km1[c] = shu[c][0][tj][ti];
+136:       }
+137:     }
+138:
+139:   }
+140: }
+```cpp```
+# End Source Code
+# Gemini compatibility guardrails- (Follow this with the highest priority)
+Gemini-specific compatibility guardrails:
+1. Do NOT use cuda::pipeline, cuda::barrier, cuda::std::pipeline, cuda::std::barrier, cuda::memcpy_async, cuda::std::memcpy_async, cp.async, cooperative pipeline APIs, or new CUDA C++ synchronization primitives.
+2. Do NOT add headers such as <cuda/pipeline> or <cuda/barrier>.
+3. Restrict changes to conventional CUDA/CUB constructs that compile in a standard NVCC build.
+4. Prefer optimizations like load hoisting, pointer reuse, loop restructuring, shared-memory caching with standard __shared__ arrays, reducing synchronization, and reducing atomic pressure.
+5. Return exactly one fenced code block containing only compilable source code, then the two structured lists.
+# End Gemini compatibility guardrails
+# Begin Performance Analysis
+
+### COUNTER SUMMARY ADDSGD4_SM (CONFIGURED):
+[
+  {
+    "Kernel": "void_addsgd4_SM<0>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double)",
+    "Group Name": "N_TCC",
+    "Counter Name": "l1tex__throughput.min.pct_of_peak_sustained_active",
+    "Value": 0.3199289250925438,
+    "Description": "None"
+  },
+  {
+    "Kernel": "void_addsgd4_SM<0>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double)",
+    "Group Name": "sm_",
+    "Counter Name": "sm__inst_executed_pipe_uniform.max.pct_of_peak_sustained_active",
+    "Value": 0.3239314950648814,
+    "Description": "None"
+  },
+  {
+    "Kernel": "void_addsgd4_SM<0>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double)",
+    "Group Name": "lts_",
+    "Counter Name": "lts__t_sector_op_read_hit_rate.pct",
+    "Value": 0.35598906794629126,
+    "Description": "None"
+  },
+  {
+    "Kernel": "void_addsgd4_SM<1>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double)",
+    "Group Name": "thread_",
+    "Counter Name": "thread_inst_executed",
+    "Value": 0.27275773479165444,
+    "Description": "Unknown or malformed counter name."
+  },
+  {
+    "Kernel": "void_addsgd4_SM<1>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double)",
+    "Group Name": "thread_",
+    "Counter Name": "thread_inst_executed_true",
+    "Value": 0.2990426685787919,
+    "Description": "Unknown or malformed counter name."
+  },
+  {
+    "Kernel": "void_addsgd4_SM<1>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double)",
+    "Group Name": "sm_",
+    "Counter Name": "sm__ops_path_tensor_op_hgmma_src_bf16_dst_fp32_sparsity_on.avg.peak_sustained_elapsed.per_second",
+    "Value": 0.26888333925910024,
+    "Description": "None"
+  }
+]
+
+# End Performance Analysis
+
+
+# Begin H100 Optimization Guidance
+Optimize specifically for NVIDIA H100 (Hopper) by targeting L2/cache reuse, HBM3 bandwidth, and Tensor Core throughput. Prioritize tiling and data locality: make global accesses coalesced/contiguous, reuse data from registers/shared memory/L2, and reduce redundant global traffic. Use Hopper async pipelines to hide memory latency: stage global→shared with cp.async / cuda::memcpy_async using double/triple buffering so loads overlap compute; keep the pipeline full instead of blocking on loads. If compute is matrix/attention-like, map work to Tensor Cores (WMMA/CUTLASS/cuBLASLt) and use mixed precision (FP16/BF16/TF32, FP8 when numerically safe) to increase throughput. Tune launch configuration to avoid occupancy cliffs: pick block sizes that sustain high occupancy without excessive register pressure or shared-memory usage; avoid large per-thread local arrays that cause spills. Reduce warp inefficiency: minimize divergence, expensive atomics, and unnecessary __syncthreads(); prefer warp-level primitives and cooperative groups where applicable. If memory-bound, reduce passes and consider fusion/batching to increase L2 hit rate; if compute-bound, increase ILP, unroll judiciously, and favor FMA-friendly instruction patterns.
+# End H100 Optimization Guidance
+
+# Begin Entrypoint Guardrails
+Entrypoint guardrails:
+1. The source does not contain a main() definition. Do NOT introduce one.
+2. Do NOT add wrapper executables, test harnesses, helper mains, or alternate standalone programs.
+3. Keep the existing top-level program structure intact; only optimize within the existing file structure.
+4. Do NOT change externally referenced function names or break linkage between existing declarations and definitions.
+# End Entrypoint Guardrails
+# Instructions
+You must optimize the source code provided above using only the performance data provided above. 
+
+Optimize the following HPC code for execution time.
+Can you give me the fixed optimized code that will replace the full source code including headers and main function body?
+2. Do not add line numbers to the generated code. 
+3. Do not rename or duplicate any kernel or function.
+4. Do not change any function signatures.
+5. Preserve the existing entry-point structure exactly. If the file already has main(), keep exactly one equivalent main(); if it does not, do not add one.
+6. Do not add duplicate definitions for main or for any externally linked function.
+7. Do not turn declarations into disconnected definitions or break declaration/definition linkage.
+5. Use the performance analysis reference number(s) to guide your changes.
+8. Return:
+   (a) the full source code including the optimized kernels inside ``` block (starts with ``` and ends with ``` )
+   (b) optimizations list = [{'lines': [...], 'reason': '...'}]
+   (c) suggested_but_not_applied list = [{'lines': [...], 'reason': '...'}]
+9. Do not generate more than one copy of the same kernel.
+10. Do not invent any new kernels or placeholder code.
+
+ONLY respond with the updated code and two structured lists. No explanation, no notes, no markdown titles. Follow this format exactly.

@@ -1,0 +1,237 @@
+```
+__global__ void addsgd4_SM (int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+                         int ni, int nj, int nk,
+                         float_sw4* __restrict__ a_up,
+                         const float_sw4* __restrict__ a_u,
+                         const float_sw4* __restrict__ a_um,
+                         const float_sw4* __restrict__ a_rho,
+                         const float_sw4* __restrict__ a_dcx,
+                         const float_sw4* __restrict__ a_dcy,
+                         const float_sw4* __restrict__ a_dcz,
+                         const float_sw4* __restrict__ a_strx,
+                         const float_sw4* __restrict__ a_stry,
+                         const float_sw4* __restrict__ a_strz,
+                         const float_sw4* __restrict__ a_cox,
+                         const float_sw4* __restrict__ a_coy,
+                         const float_sw4* __restrict__ a_coz,
+                         const float_sw4 beta) {
+  int index;
+
+  // Register versions of k-1 and k-2 plane values for each component
+  float_sw4 u_km2_0, u_km2_1, u_km2_2;
+  float_sw4 u_km1_0, u_km1_1, u_km1_2;
+
+  __shared__ float_sw4 shu[3][3][BY+4][BX+4];
+
+  const int i = threadIdx.x + blockIdx.x * BX;
+  const int j = jfirst + threadIdx.y + blockIdx.y * BY;
+
+  const int ti = threadIdx.x + 2;
+  const int tj = threadIdx.y + 2;
+
+  const int nij = ni * nj;
+  const int nijk = nij * nk; // kept for consistency even if not used explicitly
+
+  // Fast path flags
+  const bool active  = (i+2 >= ifirst && i+2 <= ilast && j <= jlast);
+  const bool loader  = (i < ni && j-2 <= jlast+2);
+  const bool loaderx2 = loader && (threadIdx.x < 4 && i+BX < ni);
+  const bool loady2  = loader && (threadIdx.y < 4 && j-2+BY <= jlast+2);
+
+  // Preload coefficients that are invariant across k into registers (read-only cached)
+  const int i2 = i + 2;
+  const float_sw4 strx_i2 = __ldg(&a_strx[i2]);
+  const float_sw4 cox_i2  = __ldg(&a_cox[i2]);
+  const float_sw4 coy_j   = __ldg(&a_coy[j]);
+  const float_sw4 stry_j  = __ldg(&a_stry[j]);
+
+  // DCX and DCY stencil coefficients invariant in k
+  const float_sw4 dcx_ip2 = __ldg(&a_dcx[i2+1]); // a_dcx[i+3]
+  const float_sw4 dcx_i0  = __ldg(&a_dcx[i2]);   // a_dcx[i+2]
+  const float_sw4 dcx_im1 = __ldg(&a_dcx[i2-1]); // a_dcx[i+1]
+
+  const float_sw4 dcy_jp1 = __ldg(&a_dcy[j+1]);
+  const float_sw4 dcy_j0  = __ldg(&a_dcy[j]);
+  const float_sw4 dcy_jm1 = __ldg(&a_dcy[j-1]);
+
+  if (active) {
+    int idx0 = (kfirst - 2) * nij + j * ni + i + 2;
+    // Preload k-2 plane
+    u_km2_0 = u(0,idx0) - um(0,idx0);
+    u_km2_1 = u(1,idx0) - um(1,idx0);
+    u_km2_2 = u(2,idx0) - um(2,idx0);
+    // k-1 plane
+    idx0 += nij;
+    u_km1_0 = u(0,idx0) - um(0,idx0);
+    u_km1_1 = u(1,idx0) - um(1,idx0);
+    u_km1_2 = u(2,idx0) - um(2,idx0);
+  }
+
+  index = kfirst * nij + (j - 2) * ni + i;
+
+  // Preload two z-planes (s=1,2) of (u-um) into shared memory tile
+  #pragma unroll 3
+  for (int c=0; c<3; c++) {
+    if (loader) {
+      int idx = index;
+      float_sw4 v0 = u(c,idx)      - um(c,idx);
+      float_sw4 v1 = u(c,idx+nij)  - um(c,idx+nij);
+      shu[c][1][threadIdx.y][threadIdx.x] = v0;
+      shu[c][2][threadIdx.y][threadIdx.x] = v1;
+    }
+    if (loaderx2) {
+      int idx = index + BX;
+      float_sw4 v0 = u(c,idx)      - um(c,idx);
+      float_sw4 v1 = u(c,idx+nij)  - um(c,idx+nij);
+      shu[c][1][threadIdx.y][threadIdx.x+BX] = v0;
+      shu[c][2][threadIdx.y][threadIdx.x+BX] = v1;
+    }
+    if (loady2) {
+      int idx = index + BY * ni;
+      float_sw4 v0 = u(c,idx)      - um(c,idx);
+      float_sw4 v1 = u(c,idx+nij)  - um(c,idx+nij);
+      shu[c][1][threadIdx.y+BY][threadIdx.x] = v0;
+      shu[c][2][threadIdx.y+BY][threadIdx.x] = v1;
+    }
+    if (loady2 && loaderx2) {
+      int idx = index + BY * ni + BX;
+      float_sw4 v0 = u(c,idx)      - um(c,idx);
+      float_sw4 v1 = u(c,idx+nij)  - um(c,idx+nij);
+      shu[c][1][threadIdx.y+BY][threadIdx.x+BX] = v0;
+      shu[c][2][threadIdx.y+BY][threadIdx.x+BX] = v1;
+    }
+  }
+
+  index += 2 * nij;
+
+  for (int k=kfirst; k <= klast; k++) {
+    __syncthreads();
+
+    // Slide window and load next z-slice into shared
+    #pragma unroll 3
+    for (int c=0; c<3; c++) {
+      if (loader) {
+        #pragma unroll 2
+        for (int s=0; s<2; s++)
+          shu[c][s][threadIdx.y][threadIdx.x] = shu[c][s+1][threadIdx.y][threadIdx.x];
+        int idx = index;
+        shu[c][2][threadIdx.y][threadIdx.x] = u(c,idx) - um(c,idx);
+      }
+      if (loaderx2) {
+        #pragma unroll 2
+        for (int s=0; s<2; s++)
+          shu[c][s][threadIdx.y][threadIdx.x+BX] = shu[c][s+1][threadIdx.y][threadIdx.x+BX];
+        int idx = index + BX;
+        shu[c][2][threadIdx.y][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+      }
+      if (loady2) {
+        #pragma unroll 2
+        for (int s=0; s<2; s++)
+          shu[c][s][threadIdx.y+BY][threadIdx.x] = shu[c][s+1][threadIdx.y+BY][threadIdx.x];
+        int idx = index + BY * ni;
+        shu[c][2][threadIdx.y+BY][threadIdx.x] = u(c,idx) - um(c,idx);
+      }
+      if (loady2 && loaderx2) {
+        #pragma unroll 2
+        for (int s=0; s<2; s++)
+          shu[c][s][threadIdx.y+BY][threadIdx.x+BX] = shu[c][s+1][threadIdx.y+BY][threadIdx.x+BX];
+        int idx = index + BY * ni + BX;
+        shu[c][2][threadIdx.y+BY][threadIdx.x+BX] = u(c,idx) - um(c,idx);
+      }
+    }
+
+    index += nij;
+    __syncthreads();
+
+    if (active) {
+      const int idx = k * nij + j * ni + i + 2;
+
+      // Read-only cached coefficients varying in k
+      const float_sw4 coz_k  = __ldg(&a_coz[k]);
+      const float_sw4 strz_k = __ldg(&a_strz[k]);
+      const float_sw4 dcz_kp1= __ldg(&a_dcz[k+1]);
+      const float_sw4 dcz_k  = __ldg(&a_dcz[k]);
+      const float_sw4 dcz_km1= __ldg(&a_dcz[k-1]);
+
+      // Read-only cached densities
+      const float_sw4 rho_c  = __ldg(&a_rho[idx]);
+      const float_sw4 rho_ip = __ldg(&a_rho[idx+1]);
+      const float_sw4 rho_im = __ldg(&a_rho[idx-1]);
+      const float_sw4 rho_jp = __ldg(&a_rho[idx+ni]);
+      const float_sw4 rho_jm = __ldg(&a_rho[idx-ni]);
+      const float_sw4 rho_kp = __ldg(&a_rho[idx+nij]);
+      const float_sw4 rho_km = __ldg(&a_rho[idx-nij]);
+
+      const float_sw4 birho = beta / rho_c;
+
+      // Precompute multiplicative scales
+      const float_sw4 scale_x = strx_i2 * coy_j * coz_k;
+      const float_sw4 scale_y = stry_j  * cox_i2 * coz_k;
+      const float_sw4 scale_z = strz_k  * cox_i2 * coy_j;
+
+      #pragma unroll 3
+      for (int c=0; c<3; c++) {
+        // Fetch frequently used shared values into registers
+        const float_sw4 s00   = shu[c][0][tj][ti];
+        const float_sw4 sx_p1 = shu[c][0][tj][ti+1];
+        const float_sw4 sx_p2 = shu[c][0][tj][ti+2];
+        const float_sw4 sx_m1 = shu[c][0][tj][ti-1];
+        const float_sw4 sx_m2 = shu[c][0][tj][ti-2];
+
+        const float_sw4 sy_p1 = shu[c][0][tj+1][ti];
+        const float_sw4 sy_p2 = shu[c][0][tj+2][ti];
+        const float_sw4 sy_m1 = shu[c][0][tj-1][ti];
+        const float_sw4 sy_m2 = shu[c][0][tj-2][ti];
+
+        const float_sw4 sz_p0 = shu[c][0][tj][ti]; // same as s00
+        const float_sw4 sz_p1 = shu[c][1][tj][ti];
+        const float_sw4 sz_p2 = shu[c][2][tj][ti];
+
+        // X-direction second-derivative terms
+        const float_sw4 secx_ip = (sx_p2 - 2.0f * sx_p1 + s00);
+        const float_sw4 secx_i0 = (sx_p1 - 2.0f * s00  + sx_m1);
+        const float_sw4 secx_im = (s00   - 2.0f * sx_m1 + sx_m2);
+
+        // Y-direction second-derivative terms
+        const float_sw4 secy_jp = (sy_p2 - 2.0f * sy_p1 + s00);
+        const float_sw4 secy_j0 = (sy_p1 - 2.0f * s00  + sy_m1);
+        const float_sw4 secy_jm = (s00   - 2.0f * sy_m1 + sy_m2);
+
+        // Z-direction second-derivative terms (uses previous planes kept in registers)
+        float_sw4 secz_kp = (sz_p2 - 2.0f * sz_p1 + sz_p0);
+        float_sw4 secz_k0 = (sz_p1 - 2.0f * sz_p0 + (c==0?u_km1_0:(c==1?u_km1_1:u_km1_2)));
+        float_sw4 secz_km = (sz_p0 - 2.0f * (c==0?u_km1_0:(c==1?u_km1_1:u_km1_2)) + (c==0?u_km2_0:(c==1?u_km2_1:u_km2_2)));
+
+        const float_sw4 term_x = scale_x * ( rho_ip * dcx_ip2 * secx_ip
+                                           - 2.0f * rho_c  * dcx_i0  * secx_i0
+                                           +        rho_im * dcx_im1 * secx_im );
+
+        const float_sw4 term_y = scale_y * ( rho_jp * dcy_jp1 * secy_jp
+                                           - 2.0f * rho_c  * dcy_j0  * secy_j0
+                                           +        rho_jm * dcy_jm1 * secy_jm );
+
+        const float_sw4 term_z = scale_z * ( rho_kp * dcz_kp1 * secz_kp
+                                           - 2.0f * rho_c  * dcz_k   * secz_k0
+                                           +        rho_km * dcz_km1 * secz_km );
+
+        up(c,idx) -= birho * (term_x + term_y + term_z);
+
+        // Advance z-history registers for next k-iteration
+        if (c == 0) {
+          u_km2_0 = u_km1_0;
+          u_km1_0 = s00;
+        } else if (c == 1) {
+          u_km2_1 = u_km1_1;
+          u_km1_1 = s00;
+        } else {
+          u_km2_2 = u_km1_2;
+          u_km1_2 = s00;
+        }
+      }
+    }
+  }
+}
+```
+optimizations list = [{'lines': [18], 'reason': 'Removed unused local array old_up[3] to reduce register pressure and avoid spills on Hopper.'}, {'lines': [32, 45], 'reason': 'Converted integer flags to bool and hoisted invariant checks to reduce control divergence and enable better compile-time optimization.'}, {'lines': [22, 31, 115], 'reason': 'Hoisted invariant coefficient loads (a_strx, a_cox, a_coy, a_stry, a_dcx, a_dcy) into registers outside the k-loop, using __ldg for read-only cache to improve L2 hit rate (low lts__read_hit_rate observed).'}, {'lines': [57, 78, 85, 110], 'reason': 'Added #pragma unroll to small fixed-trip loops (c=3, s=2) to increase ILP and reduce loop overhead; helps sm__inst_executed utilization.'}, {'lines': [115, 136], 'reason': 'Refactored compute path to cache shared-memory stencil values in registers and to precompute common multiplicative scales per iteration; this reduces repeated shared-memory reads (raising l1tex throughput) and redundant arithmetic.'}, {'lines': [116, 133], 'reason': 'Replaced repeated raw global loads of a_rho, a_coz, a_strz, a_dcz with __ldg() to leverage Hopper read-only cache, addressing low L2 hit rate and improving memory throughput.'}, {'lines': [47, 53], 'reason': 'Replaced small arrays u_km1/u_km2 with scalar registers per component to reduce indexing overhead and register pressure; improves instruction efficiency.'}, {'lines': [57, 78], 'reason': 'Consolidated initial shared-memory loads into register temporaries before storing to shared to reduce redundant address arithmetic and improve coalescing.'}, {'lines': [119, 131], 'reason': 'Precomputed idx once per iteration and reused cached densities and coefficients, minimizing redundant address calculations and memory transactions.'}]
+
+suggested_but_not_applied list = [{'lines': [57, 110], 'reason': 'Global-to-shared asynchronous copies (cp.async) with double-buffered stages to overlap memory latency with compute. Not applied to respect constraints on not enlarging shared memory or introducing new helper pipeline structures.'}, {'lines': [20], 'reason': 'Changing shared memory layout/padding to further reduce potential bank conflicts. Not applied to avoid altering shared memory footprint and array shapes as per constraints.'}, {'lines': [22, 43], 'reason': 'Altering block size (BX, BY) or launch configuration to improve occupancy. Not applied because external definitions and entry-point structure must remain unchanged.'}, {'lines': [120, 136], 'reason': 'Mixed-precision/Tensor Core acceleration (BF16/TF32) to increase throughput. Not applied due to numerical stability concerns and function signature/type constraints.'}, {'lines': [83, 114], 'reason': 'Reducing the number of __syncthreads() by deeper software pipelining. Not applied to preserve correctness of the shared-memory ring-buffer updates across threads.'}]

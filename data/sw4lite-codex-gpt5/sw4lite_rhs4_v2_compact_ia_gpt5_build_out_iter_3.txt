@@ -1,0 +1,60 @@
+-- The CXX compiler identification is GNU 12.2.0
+-- The CUDA compiler identification is NVIDIA 12.8.93 with host compiler GNU 12.2.0
+-- The Fortran compiler identification is GNU 12.2.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /packages/openmpi/4.1.1-gcc12.2/bin/mpicxx - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Detecting CUDA compiler ABI info
+-- Detecting CUDA compiler ABI info - done
+-- Check for working CUDA compiler: /packages/cuda/12.8.1/bin/nvcc - skipped
+-- Detecting CUDA compile features
+-- Detecting CUDA compile features - done
+-- Detecting Fortran compiler ABI info
+-- Detecting Fortran compiler ABI info - done
+-- Check for working Fortran compiler: /packages/openmpi/4.1.1-gcc12.2/bin/mpif90 - skipped
+-- Found MPI_CXX: /packages/openmpi/4.1.1-gcc12.2/bin/mpicxx (found version "3.1")
+-- Found MPI_Fortran: /packages/openmpi/4.1.1-gcc12.2/bin/mpif90 (found version "3.1")
+-- Found MPI: TRUE (found version "3.1")
+-- Found BLAS: /opt/cray/pe/libsci/25.09.0/GNU/12.2/x86_64/lib/libsci_gnu.so
+-- Found LAPACK: /opt/cray/pe/libsci/25.09.0/GNU/12.2/x86_64/lib/libsci_gnu.so
+-- Configuring done (5.9s)
+-- Generating done (0.0s)
+-- Build files have been written to: /storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/build
+[  2%] Building Fortran object CMakeFiles/sw4lite.dir/src/type_defs.f90.o
+[  5%] Building CUDA object CMakeFiles/sw4lite.dir/src/main.C.o
+[  7%] Building CUDA object CMakeFiles/sw4lite.dir/src/EW.C.o
+[ 10%] Building CUDA object CMakeFiles/sw4lite.dir/src/rhs4sg_rev.C.o
+[ 15%] Building CUDA object CMakeFiles/sw4lite.dir/src/Sarray.C.o
+[ 15%] Building CUDA object CMakeFiles/sw4lite.dir/src/ew-cfromfort.C.o
+[ 21%] Building CUDA object CMakeFiles/sw4lite.dir/src/Source.C.o
+[ 21%] Building CUDA object CMakeFiles/sw4lite.dir/src/EWCuda.C.o
+[ 23%] Building CUDA object CMakeFiles/sw4lite.dir/src/rhs4sg.C.o
+[ 26%] Building CUDA object CMakeFiles/sw4lite.dir/src/Parallel_IO.C.o
+[ 31%] Building CUDA object CMakeFiles/sw4lite.dir/src/Polynomial.C.o
+[ 34%] Building CUDA object CMakeFiles/sw4lite.dir/src/TimeSeries.C.o
+[ 34%] Building CUDA object CMakeFiles/sw4lite.dir/src/GridPointSource.C.o
+[ 36%] Building CUDA object CMakeFiles/sw4lite.dir/src/curvilinear-c.C.o
+[ 42%] Building Fortran object CMakeFiles/sw4lite.dir/src/bcfort.f.o
+[ 42%] Building CUDA object CMakeFiles/sw4lite.dir/src/time_functions_cu.C.o
+[ 44%] Building Fortran object CMakeFiles/sw4lite.dir/src/curvilinear4sg.f.o
+[ 47%] Building CUDA object CMakeFiles/sw4lite.dir/src/device-routines.C.o
+[ 52%] Building CUDA object CMakeFiles/sw4lite.dir/src/SuperGrid.C.o
+[ 52%] Building Fortran object CMakeFiles/sw4lite.dir/src/addsgd.f.o
+[ 55%] Building Fortran object CMakeFiles/sw4lite.dir/src/metric.f.o
+[ 60%] Building CUDA object CMakeFiles/sw4lite.dir/src/CheckPoint.C.o
+[ 63%] Building CUDA object CMakeFiles/sw4lite.dir/src/MaterialData.C.o
+[ 63%] Building CUDA object CMakeFiles/sw4lite.dir/src/rhs4sgcurv_rev.C.o
+[ 68%] Building CUDA object CMakeFiles/sw4lite.dir/src/EW-dg.C.o
+[ 68%] Building CUDA object CMakeFiles/sw4lite.dir/src/MaterialBlock.C.o
+[ 76%] Building CUDA object CMakeFiles/sw4lite.dir/src/sacsubc.C.o
+[ 78%] Building Fortran object CMakeFiles/sw4lite.dir/src/solerr3.f.o
+[ 78%] Building CUDA object CMakeFiles/sw4lite.dir/src/rhs4sgcurv.C.o
+[ 78%] Building CUDA object CMakeFiles/sw4lite.dir/src/SecondOrderSection.C.o
+[ 84%] Building Fortran object CMakeFiles/sw4lite.dir/src/boundaryOp.f.o
+[ 84%] Building CUDA object CMakeFiles/sw4lite.dir/src/EW_cuda.C.o
+[ 86%] Building Fortran object CMakeFiles/sw4lite.dir/src/freesurfcurvisg.f.o
+[ 89%] Building Fortran object CMakeFiles/sw4lite.dir/src/rhs4th3fort.f.o
+[ 92%] Building Fortran object CMakeFiles/sw4lite.dir/src/dgmodule.f90.o
+[ 94%] Building Fortran object CMakeFiles/sw4lite.dir/src/lglnodes.f90.o

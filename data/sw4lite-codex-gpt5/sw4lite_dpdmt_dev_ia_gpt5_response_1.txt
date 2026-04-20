@@ -1,0 +1,64 @@
+```
+__global__ void dpdmt_dev( int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+			  float_sw4* up, float_sw4* u, float_sw4* um,
+			  float_sw4* u2, float_sw4 dt2i, int ghost_points )
+{
+    const size_t myi = static_cast<size_t>(threadIdx.x) +
+                       static_cast<size_t>(blockIdx.x) * static_cast<size_t>(blockDim.x);
+    const size_t nthreads = static_cast<size_t>(gridDim.x) * static_cast<size_t>(blockDim.x);
+    const size_t npts = static_cast<size_t>(ilast - ifirst + 1) *
+                        static_cast<size_t>(jlast - jfirst + 1) *
+                        static_cast<size_t>(klast - kfirst + 1);
+    const size_t N = npts * static_cast<size_t>(3);
+
+    const float_sw4* __restrict__ up_r = up;
+    const float_sw4* __restrict__ u_r  = u;
+    const float_sw4* __restrict__ um_r = um;
+    float_sw4* __restrict__ u2_r = u2;
+    const float_sw4 cdt2i = dt2i;
+
+    size_t stride = nthreads;
+    size_t i = myi;
+
+    // Unrolled grid-stride loop to increase ILP and better hide memory latency
+    for (; i + 3 * stride < N; i += 4 * stride)
+    {
+        size_t i0 = i;
+        size_t i1 = i + stride;
+        size_t i2 = i + 2 * stride;
+        size_t i3 = i + 3 * stride;
+
+        float_sw4 up0 = up_r[i0];
+        float_sw4 u0  = u_r[i0];
+        float_sw4 um0 = um_r[i0];
+        u2_r[i0] = cdt2i * (up0 - (float_sw4)2.0 * u0 + um0);
+
+        float_sw4 up1 = up_r[i1];
+        float_sw4 u1  = u_r[i1];
+        float_sw4 um1 = um_r[i1];
+        u2_r[i1] = cdt2i * (up1 - (float_sw4)2.0 * u1 + um1);
+
+        float_sw4 up2 = up_r[i2];
+        float_sw4 u2v = u_r[i2];
+        float_sw4 um2 = um_r[i2];
+        u2_r[i2] = cdt2i * (up2 - (float_sw4)2.0 * u2v + um2);
+
+        float_sw4 up3 = up_r[i3];
+        float_sw4 u3  = u_r[i3];
+        float_sw4 um3 = um_r[i3];
+        u2_r[i3] = cdt2i * (up3 - (float_sw4)2.0 * u3 + um3);
+    }
+
+    // Tail loop
+    for (; i < N; i += stride)
+    {
+        float_sw4 upv = up_r[i];
+        float_sw4 uv  = u_r[i];
+        float_sw4 umv = um_r[i];
+        u2_r[i] = cdt2i * (upv - (float_sw4)2.0 * uv + umv);
+    }
+}
+```
+optimizations list = [{'lines': [1, 5, 6, 7, 8], 'reason': 'Precompute invariants (thread index, stride, N) once to reduce instruction count and register dependencies.'}, {'lines': [10, 11, 12, 13, 14], 'reason': 'Use const and __restrict__ pointer aliases and a register copy of dt2i to enable read-only caching on H100, reduce aliasing, and keep scalar in registers.'}, {'lines': [20, 45], 'reason': 'Manually unroll the grid-stride loop by 4 to increase instruction-level parallelism (ILP), better hide HBM3 latency, and reduce loop overhead while maintaining fully coalesced accesses per sub-iteration.'}, {'lines': [29, 34, 39, 44, 51], 'reason': 'Use a single multiply with a compile-time constant cast to float_sw4 to encourage FMA-friendly patterns and avoid implicit type promotions.'}]
+
+suggested_but_not_applied list = [{'lines': [1, 45], 'reason': 'Global->shared async staging with cp.async and double-buffering could further hide latency on H100 but adding shared memory would increase shared-memory footprint beyond the original (constraint 11).'}, {'lines': [1, 45], 'reason': 'Vectorized loads/stores (e.g., float2/float4 or double2) could improve bandwidth, but alignment and the exact definition of float_sw4 are unknown, risking misaligned accesses and correctness.'}, {'lines': [1, 45], 'reason': 'Restructuring data access to operate on three components per point could improve locality, but the storage layout is not guaranteed; changing indexing could break correctness.'}, {'lines': [1, 45], 'reason': 'Mapping computation to Tensor Cores or using mixed precision is not applicable here since the kernel is purely memory-bound and element-wise with no matrix math.'}]

@@ -1,0 +1,151 @@
+```
+#include "sobol.h"
+#include "sobol_gpu.h"
+
+#define k_2powneg32 2.3283064E-10F
+
+// Preconditions (mathematical):
+// - n_directions (from sobol.h) is the number of direction numbers per dimension for 32-bit Sobol (commonly 32).
+// - 0 < n_vectors, 0 < n_dimensions.
+// - d_directions points to a table of direction numbers with layout [dimension][n_directions] (row-major), and is at least n_dimensions * n_directions in length.
+// - d_output points to an array of length at least n_dimensions * n_vectors.
+// - gridDim.x * blockDim.x is a power-of-two and satisfies log2(gridDim.x * blockDim.x) <= n_directions.
+// - For each blockIdx.y, the dimension's direction numbers are identical for all threads in that block (read-only).
+//
+// Postconditions (mathematical):
+// - For each dimension j in [0, n_dimensions), and for each index i in [0, n_vectors), d_output[j*n_vectors + i] holds the Sobol sequence value in [0,1) generated from the j-th dimension's direction numbers applied to integer index i.
+//
+// Loop invariants and semantic preservation proof (sketch):
+// - Invariant I1 (initial Gray-code accumulation loop over k): After completing iteration k (0-based, exclusive upper bound kmax = __ffs(stride)-1), X equals XOR over { v[k] | the k-th bit of Gray code g0 = i0^(i0>>1) equals 1 }. This holds because:
+//   Base: before loop, X = 0, which is XOR over an empty set.
+//   Step: at each k, mask = -(g&1) is all-ones if the current Gray-code bit is 1 and zero otherwise; thus X ^= (mask & v[k]) conditionally XORs v[k] into X exactly when that bit is 1. Right shift g >>= 1 progresses to the next bit. Hence I1 holds by induction.
+//   Conclusion: At loop exit, X equals the required XOR over all contributing direction numbers for index i0, matching the original algorithm.
+// - Invariant I2 (stride-progression loop over i): Let i_prev = i - stride. At loop entry, X equals the Sobol XOR state for index i_prev. Let b = __ffs(~((i_prev) | (stride-1))) - 1, and let m = log2(stride)-1. The recurrence X ^= v[m] ^ v[b] transforms the XOR state from i_prev to i (standard Gray code property for stride-aligned progression). Therefore after the update, X equals the Sobol XOR state for i. This matches the original algorithm's recurrence and holds for all iterations by induction.
+// - Replacement of shared memory broadcast with warp shuffles preserves semantics because each warp loads the same per-dimension table d_directions[0..n_directions-1] into per-lane registers (lanes 0..n_directions-1). Each v[k] access is then a warp-wide broadcast from lane k via __shfl_sync, which is equivalent to the previous read of v[k] from shared memory after a barrier. No inter-warp dependence exists, and all warps in the block observe the same readonly table, so global program meaning is unchanged.
+// - Removing __syncthreads is safe because there is no longer a cross-thread dependence via shared memory; the only per-thread state is in registers. Therefore the invariants I1 and I2 remain unbroken.
+//
+// Memory model notes:
+// - Stores to d_output are streaming (L2-cache-only) to reduce L1TEX write pressure on Hopper; no read-after-write dependency exists within the kernel.
+
+static __device__ __forceinline__ void store_global_cg(float* ptr, float val) {
+#if defined(__CUDA_ARCH__)
+    asm volatile("st.global.cg.f32 [%0], %1;" :: "l"(ptr), "f"(val));
+#else
+    *ptr = val;
+#endif
+}
+
+__global__
+void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+                     unsigned *__restrict__ d_directions,
+                     float *__restrict__ d_output)
+{
+    // Per-dimension base pointers
+    unsigned * __restrict__ dir_base = d_directions + n_directions * blockIdx.y;
+    float    * __restrict__ out_base = d_output     + n_vectors    * blockIdx.y;
+
+    // Compute thread's base index and stride; stride is power-of-two by host configuration
+    const unsigned i0     = threadIdx.x + blockIdx.x * blockDim.x;
+    const unsigned stride = gridDim.x   * blockDim.x;
+
+    // Precompute constants derived from stride
+    const int ffs_stride = __ffs(stride);
+    const int kmax       = ffs_stride - 1;   // number of low Gray-code bits to consider
+    const int idx_log2sm1 = ffs_stride - 2;  // index for v[log2(stride)-1]
+
+    // Warp-local load of direction numbers with read-only caching
+    const unsigned lane   = threadIdx.x & 31;
+    const unsigned wmask  = 0xFFFFFFFFu;
+    unsigned v_lane = 0u;
+    if (lane < n_directions) {
+#if defined(__CUDA_ARCH__)
+        v_lane = __ldg(&dir_base[lane]);
+#else
+        v_lane = dir_base[lane];
+#endif
+    }
+
+    // Initial Gray code for i0
+    unsigned g = i0 ^ (i0 >> 1);
+    unsigned X = 0u;
+
+    // Build initial X using up to kmax bits; v[k] is broadcast via warp shuffle from lane k
+    // Loop invariant I1 holds as documented above.
+#pragma unroll 32
+    for (int k = 0; k < kmax; ++k) {
+        const unsigned vk = __shfl_sync(wmask, v_lane, k);
+        const unsigned mask = -(g & 1u);
+        X ^= (mask & vk);
+        g >>= 1;
+    }
+
+    // Write first element if in range
+    if (i0 < n_vectors) {
+        const float val = (float)X * k_2powneg32;
+        store_global_cg(out_base + i0, val);
+    }
+
+    // Precompute for stride-stepping loop
+    const unsigned v_log2stridem1 = __shfl_sync(wmask, v_lane, idx_log2sm1);
+    const unsigned v_stridemask   = stride - 1u;
+
+    // Stride progression loop; invariant I2 holds as documented above.
+    for (unsigned i = i0 + stride; i < n_vectors; i += stride) {
+        const int tz = __ffs(~((i - stride) | v_stridemask)) - 1;
+        const unsigned v_tz = __shfl_sync(wmask, v_lane, tz);
+        X ^= (v_log2stridem1 ^ v_tz);
+        const float val = (float)X * k_2powneg32;
+        store_global_cg(out_base + i, val);
+    }
+}
+
+double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+                unsigned int *d_directions, float *d_output)
+{
+    // Increase threads per block to improve occupancy on H100 while keeping power-of-two
+    const int threadsperblock = 256;
+
+    dim3 dimGrid;
+    dim3 dimBlock;
+
+    dimGrid.y = n_dimensions;
+
+    // Seed dimGrid.x with at least 96 (4*24) blocks or 1 depending on problem size
+    if (n_dimensions < (4 * 24)) {
+        dimGrid.x = 4 * 24;
+    } else {
+        dimGrid.x = 1;
+    }
+
+    if (dimGrid.x > (unsigned int)(n_vectors / threadsperblock)) {
+        dimGrid.x = (n_vectors + threadsperblock - 1) / threadsperblock;
+    }
+
+    // Round up grid.x to a power of two
+    unsigned int targetDimGridX = dimGrid.x;
+    for (dimGrid.x = 1; dimGrid.x < targetDimGridX; dimGrid.x *= 2);
+
+    // Clamp grid.x so that stride does not exceed 1 << n_directions (precondition for index bounds)
+    const unsigned int maxStride = 1u << n_directions;
+    while (dimGrid.x > 1 && (dimGrid.x * threadsperblock) > maxStride) {
+        dimGrid.x >>= 1;
+    }
+    if (dimGrid.x == 0) dimGrid.x = 1; // safety
+
+    dimBlock.x = threadsperblock;
+
+    cudaDeviceSynchronize();
+    auto start = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < repeat; i++)
+        sobolGPU_kernel <<<dimGrid, dimBlock>>> (
+          (unsigned)n_vectors, (unsigned)n_dimensions, d_directions, d_output);
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    return time;
+}
+```
+optimizations list = [{'lines': ['sobolGPU_kernel body'], 'reason': 'Replaced shared-memory table and __syncthreads() with warp-level shuffles broadcasting v[k] from lane k. Eliminates shared-memory short scoreboards and barrier stalls seen at PC Summary lines 223, 219, 228, addressing stall_short_sb_ratio and stall_barrier_ratio; improves eligible warps (Roofline: only 0.82 eligible/issue).'}, {'lines': ['sobolGPU_kernel: initial k-loop'], 'reason': 'Precomputed __ffs(stride), unrolled up to 32 with #pragma unroll to reduce branch and ffs recomputation overhead; targets stall_branch_resolving_ratio and stall_wait_ratio at lines 243, 249-251.'}, {'lines': ['sobolGPU_kernel: stores to d_output'], 'reason': 'Used st.global.cg streaming stores to reduce L1TEX crossbar write pressure (Counter: l1tex__m_l1tex2xbar_write_bytes.sum and pct_of_peak_sustained_elapsed high), improving stall_mio/l1tex.'}, {'lines': ['sobolGPU_kernel: v access'], 'reason': 'Loaded direction numbers via __ldg() read-only cache to reduce latency and DRAM traffic; mitigates stall_wait_ratio at lines 219 and overall memory stalls.'}, {'lines': ['sobolGPU: launch configuration'], 'reason': 'Increased threadsperblock from 64 to 256 to raise occupancy on H100 (Roofline showed 25.6% occupancy).'}, {'lines': ['sobolGPU: grid.x power-of-two clamp'], 'reason': 'Ensured stride remains a power-of-two and bounded by 1<<n_directions to preserve correctness while keeping high occupancy; avoids out-of-bounds v indices and supports loop invariants.'}] 
+suggested_but_not_applied list = [{'lines': ['sobolGPU_kernel global->shared staging'], 'reason': 'cp.async/cuda::memcpy_async double-buffering for direction numbers was considered, but the table is tiny (<=32 ints) and now broadcast via shuffles per warp; added complexity would not reduce the dominant stalls per PC Summary and could hurt register pressure.'}, {'lines': ['sobolGPU_kernel vectorized stores'], 'reason': 'Packing outputs into float2/float4 for vectorized stores could reduce store instruction count, but thread-wise ownership is scalar and stride progression makes safe, aligned vectorization across threads nontrivial; risking misalignment and divergence; not applied.'}, {'lines': ['sobolGPU_kernel wider per-thread register caching of v[]'], 'reason': 'Replicating the full direction table into per-thread registers (32 regs) could eliminate any remaining shfls but would significantly increase register pressure and potentially reduce occupancy further (Roofline occupancy already low); not applied.'}, {'lines': ['sobolGPU prefetch/fusion across dimensions'], 'reason': 'Fusing multiple dimensions per block to reuse L2 might improve cache locality, but it would alter the kernel’s work decomposition across blockIdx.y and change the public behavior/launch semantics; disallowed by guardrails.'}]

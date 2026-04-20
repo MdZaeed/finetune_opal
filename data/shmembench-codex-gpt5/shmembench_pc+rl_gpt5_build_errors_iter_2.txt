@@ -1,0 +1,3 @@
+tmpxft_000d5568_00000000-6_main.cudafe1.cpp:(.text.startup+0x80): undefined reference to `shmembenchGPU(double*, long, int)'
+collect2: error: ld returned 1 exit status
+make: *** [Makefile:48: main] Error 1

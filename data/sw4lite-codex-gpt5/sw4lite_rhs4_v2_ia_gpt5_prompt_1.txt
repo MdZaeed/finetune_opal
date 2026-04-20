@@ -1,0 +1,666 @@
+# Begin Source Code
+```cpp```
+1: __global__ void rhs4_v2 (int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+2:                       int ni, int nj, int nk,
+3:                       float_sw4* __restrict__ a_up,
+4:                       const float_sw4* __restrict__ a_u,
+5:                       const float_sw4* __restrict__ a_um,
+6:                       const float_sw4* __restrict__ a_mu,
+7:                       const float_sw4* __restrict__ a_lambda,
+8:                       const float_sw4* __restrict__ a_rho,
+9:                       const float_sw4* __restrict__ a_fo,
+10:                       const float_sw4* __restrict__ a_strx,
+11:                       const float_sw4* __restrict__ a_stry,
+12:                       const float_sw4* __restrict__ a_strz,
+13:                       const float_sw4 h,
+14:                       const float_sw4 dt) {
+15:   int index;
+16:
+17:   const float_sw4 i6   = 1.0/6;
+18:   const float_sw4 i144 = 1.0/144;
+19:   const float_sw4 tf   = 0.75;
+20:
+21:   float_sw4 strx_im2, strx_im1, strx_i, strx_ip1, strx_ip2;
+22:   float_sw4 stry_jm2, stry_jm1, stry_j, stry_jp1, stry_jp2;
+23:   float_sw4 strz_km2, strz_km1, strz_k, strz_kp1, strz_kp2;
+24:
+25:   float_sw4 la_km2, la_km1, la_ijk, la_kp1, la_kp2;
+26:   float_sw4 la_im2, la_im1, la_ip1, la_ip2;
+27:   float_sw4 la_jm2, la_jm1, la_jp1, la_jp2;
+28:
+29:   float_sw4 mu_km2, mu_km1, mu_ijk, mu_kp1, mu_kp2;
+30:   float_sw4 mu_im2, mu_im1, mu_ip1, mu_ip2;
+31:   float_sw4 mu_jm2, mu_jm1, mu_jp1, mu_jp2;
+32:
+33:   float_sw4 fo0, fo1, fo2, rho;
+34:   float_sw4 up0, up1, up2;
+35:   float_sw4 um0, um1, um2;
+36:
+37:   float_sw4 a0, a1, a2, b0, b1, b2, c0, c1, c2, d0, d1, d2;
+38:
+39:   float_sw4 r1, r2, r3, cof;
+40:   int active=0, loader=0, loady2=0, loadx2=0;
+41:
+42:   __shared__ float_sw4 shu[3][5][BY+4][BX+4];
+43:
+44:   const int i = threadIdx.x + blockIdx.x * BX;
+45:   const int j = jfirst + threadIdx.y + blockIdx.y * BY;
+46:
+47:   const int ti = threadIdx.x + 2;
+48:   const int tj = threadIdx.y + 2;
+49:   const int tk = 2;
+50:
+51:   const int nij = ni * nj;
+52:   const int nijk = nij * nk;
+53:
+54:   int kthm0=3, kthm1=2, kthm2=1, kthm3=0, kthm4=4, kthtmp;
+55:
+56:   if (i >= ifirst && i <= ilast && j <= jlast)
+57:     active = 1;
+58:
+59:   if (j-2 <= jlast + 2) {
+60:     if (i-2 >= 0 && i-2 < ni)
+61:       loader = 1;
+62:     if (threadIdx.x < 4 && i+BX-2 < ni)
+63:       loadx2 = 1;
+64:     if (threadIdx.y < 4 && j+BY-2 <= jlast+2)
+65:       loady2 = 1;
+66:   }
+67:
+68:   index = (kfirst - 2) * nij + (j - 2) * ni + i - 2;
+69:
+70:   if (loader) {
+71:     int idx = index;
+72:     shu[0][0][threadIdx.y][threadIdx.x] = u(0,idx);
+73:     shu[1][0][threadIdx.y][threadIdx.x] = u(1,idx);
+74:     shu[2][0][threadIdx.y][threadIdx.x] = u(2,idx);
+75:     idx += nij;
+76:     shu[0][1][threadIdx.y][threadIdx.x] = u(0,idx);
+77:     shu[1][1][threadIdx.y][threadIdx.x] = u(1,idx);
+78:     shu[2][1][threadIdx.y][threadIdx.x] = u(2,idx);
+79:     idx += nij;
+80:     shu[0][2][threadIdx.y][threadIdx.x] = u(0,idx);
+81:     shu[1][2][threadIdx.y][threadIdx.x] = u(1,idx);
+82:     shu[2][2][threadIdx.y][threadIdx.x] = u(2,idx);
+83:     idx += nij;
+84:     shu[0][3][threadIdx.y][threadIdx.x] = u(0,idx);
+85:     shu[1][3][threadIdx.y][threadIdx.x] = u(1,idx);
+86:     shu[2][3][threadIdx.y][threadIdx.x] = u(2,idx);
+87:     idx += nij;
+88:     a0 = u(0,idx);
+89:     a1 = u(1,idx);
+90:     a2 = u(2,idx);
+91:   }
+92:   if (loadx2) {
+93:     int idx = index + BX;
+94:     shu[0][0][threadIdx.y][threadIdx.x+BX] = u(0,idx);
+95:     shu[1][0][threadIdx.y][threadIdx.x+BX] = u(1,idx);
+96:     shu[2][0][threadIdx.y][threadIdx.x+BX] = u(2,idx);
+97:     idx += nij;
+98:     shu[0][1][threadIdx.y][threadIdx.x+BX] = u(0,idx);
+99:     shu[1][1][threadIdx.y][threadIdx.x+BX] = u(1,idx);
+100:     shu[2][1][threadIdx.y][threadIdx.x+BX] = u(2,idx);
+101:     idx += nij;
+102:     shu[0][2][threadIdx.y][threadIdx.x+BX] = u(0,idx);
+103:     shu[1][2][threadIdx.y][threadIdx.x+BX] = u(1,idx);
+104:     shu[2][2][threadIdx.y][threadIdx.x+BX] = u(2,idx);
+105:     idx += nij;
+106:     shu[0][3][threadIdx.y][threadIdx.x+BX] = u(0,idx);
+107:     shu[1][3][threadIdx.y][threadIdx.x+BX] = u(1,idx);
+108:     shu[2][3][threadIdx.y][threadIdx.x+BX] = u(2,idx);
+109:     idx += nij;
+110:     b0 = u(0,idx);
+111:     b1 = u(1,idx);
+112:     b2 = u(2,idx);
+113:   }
+114:   if (loader && loady2) {
+115:     int idx = index + BY * ni;
+116:     shu[0][0][threadIdx.y+BY][threadIdx.x] = u(0,idx);
+117:     shu[1][0][threadIdx.y+BY][threadIdx.x] = u(1,idx);
+118:     shu[2][0][threadIdx.y+BY][threadIdx.x] = u(2,idx);
+119:     idx += nij;
+120:     shu[0][1][threadIdx.y+BY][threadIdx.x] = u(0,idx);
+121:     shu[1][1][threadIdx.y+BY][threadIdx.x] = u(1,idx);
+122:     shu[2][1][threadIdx.y+BY][threadIdx.x] = u(2,idx);
+123:     idx += nij;
+124:     shu[0][2][threadIdx.y+BY][threadIdx.x] = u(0,idx);
+125:     shu[1][2][threadIdx.y+BY][threadIdx.x] = u(1,idx);
+126:     shu[2][2][threadIdx.y+BY][threadIdx.x] = u(2,idx);
+127:     idx += nij;
+128:     shu[0][3][threadIdx.y+BY][threadIdx.x] = u(0,idx);
+129:     shu[1][3][threadIdx.y+BY][threadIdx.x] = u(1,idx);
+130:     shu[2][3][threadIdx.y+BY][threadIdx.x] = u(2,idx);
+131:     idx += nij;
+132:     c0 = u(0,idx);
+133:     c1 = u(1,idx);
+134:     c2 = u(2,idx);
+135:   }
+136:   if (loadx2 && loady2) {
+137:     int idx = index + BY * ni + BX;
+138:     shu[0][0][threadIdx.y+BY][threadIdx.x+BX] = u(0,idx);
+139:     shu[1][0][threadIdx.y+BY][threadIdx.x+BX] = u(1,idx);
+140:     shu[2][0][threadIdx.y+BY][threadIdx.x+BX] = u(2,idx);
+141:     idx += nij;
+142:     shu[0][1][threadIdx.y+BY][threadIdx.x+BX] = u(0,idx);
+143:     shu[1][1][threadIdx.y+BY][threadIdx.x+BX] = u(1,idx);
+144:     shu[2][1][threadIdx.y+BY][threadIdx.x+BX] = u(2,idx);
+145:     idx += nij;
+146:     shu[0][2][threadIdx.y+BY][threadIdx.x+BX] = u(0,idx);
+147:     shu[1][2][threadIdx.y+BY][threadIdx.x+BX] = u(1,idx);
+148:     shu[2][2][threadIdx.y+BY][threadIdx.x+BX] = u(2,idx);
+149:     idx += nij;
+150:     shu[0][3][threadIdx.y+BY][threadIdx.x+BX] = u(0,idx);
+151:     shu[1][3][threadIdx.y+BY][threadIdx.x+BX] = u(1,idx);
+152:     shu[2][3][threadIdx.y+BY][threadIdx.x+BX] = u(2,idx);
+153:     idx += nij;
+154:     d0 = u(0,idx);
+155:     d1 = u(1,idx);
+156:     d2 = u(2,idx);
+157:   }
+158:
+159:   if (active) {
+160:
+161:     strx_im2 = a_strx[i-2];
+162:     strx_im1 = a_strx[i-1];
+163:     strx_i   = a_strx[i];
+164:     strx_ip1 = a_strx[i+1];
+165:     strx_ip2 = a_strx[i+2];
+166:
+167:     stry_jm2 = a_stry[j-2];
+168:     stry_jm1 = a_stry[j-1];
+169:     stry_j   = a_stry[j];
+170:     stry_jp1 = a_stry[j+1];
+171:     stry_jp2 = a_stry[j+2];
+172:
+173:     int idx = index + 2 * ni + 2;
+174:     la_km2 = a_lambda[idx];
+175:     mu_km2 = a_mu[idx];
+176:     idx += nij;
+177:     la_km1 = a_lambda[idx];
+178:     mu_km1 = a_mu[idx];
+179:     idx += nij;
+180:     la_ijk = a_lambda[idx];
+181:     mu_ijk = a_mu[idx];
+182:     idx += nij;
+183:     la_kp1 = a_lambda[idx];
+184:     mu_kp1 = a_mu[idx];
+185:   }
+186:
+187:   index += 4 * nij;
+188:
+189:   strz_km2 = a_strz[kfirst-2];
+190:   strz_km1 = a_strz[kfirst-1];
+191:   strz_k   = a_strz[kfirst];
+192:   strz_kp1 = a_strz[kfirst+1];
+193:
+194:   cof = 1.0/(h*h);
+195:
+196:   for (int k = kfirst; k <= klast; k++) {
+197:
+198:     kthtmp = kthm4;
+199:     kthm4  = kthm3;
+200:     kthm3  = kthm2;
+201:     kthm2  = kthm1;
+202:     kthm1  = kthm0;
+203:     kthm0  = kthtmp;
+204:
+205:     __syncthreads();
+206:
+207:     shu[0][kthm0][threadIdx.y][threadIdx.x] = a0;
+208:     shu[1][kthm0][threadIdx.y][threadIdx.x] = a1;
+209:     shu[2][kthm0][threadIdx.y][threadIdx.x] = a2;
+210:
+211:     if (threadIdx.x < 4) {
+212:       shu[0][kthm0][threadIdx.y][threadIdx.x+BX] = b0;
+213:       shu[1][kthm0][threadIdx.y][threadIdx.x+BX] = b1;
+214:       shu[2][kthm0][threadIdx.y][threadIdx.x+BX] = b2;
+215:     }
+216:     if (threadIdx.y < 4) {
+217:       shu[0][kthm0][threadIdx.y+BY][threadIdx.x] = c0;
+218:       shu[1][kthm0][threadIdx.y+BY][threadIdx.x] = c1;
+219:       shu[2][kthm0][threadIdx.y+BY][threadIdx.x] = c2;
+220:       if (threadIdx.x < 4) {
+221:         shu[0][kthm0][threadIdx.y+BY][threadIdx.x+BX] = d0;
+222:         shu[1][kthm0][threadIdx.y+BY][threadIdx.x+BX] = d1;
+223:         shu[2][kthm0][threadIdx.y+BY][threadIdx.x+BX] = d2;
+224:       }
+225:     }
+226:     __syncthreads();
+227:
+228:     if (k < klast) {
+229:       int idx = index + nij;
+230:       if (loader) {
+231:         a0 = u(0,idx);
+232:         a1 = u(1,idx);
+233:         a2 = u(2,idx);
+234:       }
+235:       idx += BX;
+236:       if (loadx2) {
+237:         b0 = u(0,idx);
+238:         b1 = u(1,idx);
+239:         b2 = u(2,idx);
+240:       }
+241:       idx = index + nij + BY * ni;
+242:       if (loader & loady2) {
+243:         c0 = u(0,idx);
+244:         c1 = u(1,idx);
+245:         c2 = u(2,idx);
+246:       }
+247:       idx += BX;
+248:       if (loadx2 && loady2) {
+249:         d0 = u(0,idx);
+250:         d1 = u(1,idx);
+251:         d2 = u(2,idx);
+252:       }
+253:     }
+254:
+255:     if (active) {
+256:
+257:       strz_kp2 = a_strz[k+2];
+258:
+259:       {
+260:         int idx = index + 2 * ni + 2;
+261:         la_kp2 = a_lambda[idx];
+262:         mu_kp2 = a_mu[idx];
+263:
+264:         idx -= 2 * nij;
+265:         la_im2 = a_lambda[idx-2];
+266:         la_im1 = a_lambda[idx-1];
+267:         la_ip1 = a_lambda[idx+1];
+268:         la_ip2 = a_lambda[idx+2];
+269:         la_jm2 = a_lambda[idx-2*ni];
+270:         la_jm1 = a_lambda[idx-1*ni];
+271:         la_jp1 = a_lambda[idx+ni];
+272:         la_jp2 = a_lambda[idx+2*ni];
+273:         mu_im2 = a_mu[idx-2];
+274:         mu_im1 = a_mu[idx-1];
+275:         mu_ip1 = a_mu[idx+1];
+276:         mu_ip2 = a_mu[idx+2];
+277:         mu_jm2 = a_mu[idx-2*ni];
+278:         mu_jm1 = a_mu[idx-ni];
+279:         mu_jp1 = a_mu[idx+ni];
+280:         mu_jp2 = a_mu[idx+2*ni];
+281:
+282:         fo0 = fo(0,idx);
+283:         fo1 = fo(1,idx);
+284:         fo2 = fo(2,idx);
+285:         rho = a_rho[idx];
+286:         if (pred) {
+287:           um0 = um(0,idx);
+288:           um1 = um(1,idx);
+289:           um2 = um(2,idx);
+290:         }
+291:         else {
+292:           up0 = up(0,idx);
+293:           up1 = up(1,idx);
+294:           up2 = up(2,idx);
+295:         }
+296:       }
+297:
+298:       {
+299:         float_sw4 mux1, mux2, mux3, mux4;
+300:         mux1 = mu_im1 * strx_im1 - tf * (mu_ijk * strx_i + mu_im2 * strx_im2);
+301:         mux2 = mu_im2 * strx_im2 + mu_ip1 * strx_ip1 + 3 * (mu_ijk * strx_i   + mu_im1 * strx_im1);
+302:         mux3 = mu_im1 * strx_im1 + mu_ip2 * strx_ip2 + 3 * (mu_ip1 * strx_ip1 + mu_ijk * strx_i  );
+303:         mux4 = mu_ip1 * strx_ip1 - tf * (mu_ijk * strx_i + mu_ip2 * strx_ip2);
+304:
+305:         r1 = strx_i * ((2 * mux1 + la_im1 * strx_im1 - tf * (la_ijk * strx_i   + la_im2 * strx_im2)) *
+306:                        (shu[0][kthm2][tj+0][ti-2] - shu[0][kthm2][tj+0][ti+0]) +
+307:                        (2 * mux2 + la_im2 * strx_im2 + la_ip1 * strx_ip1 +
+308:                         3 * (la_ijk * strx_i   + la_im1 * strx_im1)) *
+309:                        (shu[0][kthm2][tj+0][ti-1] - shu[0][kthm2][tj+0][ti+0]) +
+310:                        (2 * mux3 + la_im1 * strx_im1 + la_ip2 * strx_ip2 +
+311:                         3 * (la_ip1 * strx_ip1 + la_ijk * strx_i  )) *
+312:                        (shu[0][kthm2][tj+0][ti+1] - shu[0][kthm2][tj+0][ti+0]) +
+313:                        (2 * mux4 + la_ip1 * strx_ip1 - tf * (la_ijk * strx_i   + la_ip2 * strx_ip2)) *
+314:                        (shu[0][kthm2][tj+0][ti+2] - shu[0][kthm2][tj+0][ti+0]));
+315:         r2 = strx_i * (mux1 * (shu[1][kthm2][tj+0][ti-2] - shu[1][kthm2][tj+0][ti+0]) +
+316:                        mux2 * (shu[1][kthm2][tj+0][ti-1] - shu[1][kthm2][tj+0][ti+0]) +
+317:                        mux3 * (shu[1][kthm2][tj+0][ti+1] - shu[1][kthm2][tj+0][ti+0]) +
+318:                        mux4 * (shu[1][kthm2][tj+0][ti+2] - shu[1][kthm2][tj+0][ti+0]));
+319:         r3 = strx_i * (mux1 * (shu[2][kthm2][tj+0][ti-2] - shu[2][kthm2][tj+0][ti+0]) +
+320:                        mux2 * (shu[2][kthm2][tj+0][ti-1] - shu[2][kthm2][tj+0][ti+0]) +
+321:                        mux3 * (shu[2][kthm2][tj+0][ti+1] - shu[2][kthm2][tj+0][ti+0]) +
+322:                        mux4 * (shu[2][kthm2][tj+0][ti+2] - shu[2][kthm2][tj+0][ti+0]));
+323:       }
+324:
+325:       {
+326:         float_sw4 muy1, muy2, muy3, muy4;
+327:         muy1 = mu_jm1 * stry_jm1 - tf * (mu_ijk * stry_j + mu_jm2 * stry_jm2);
+328:         muy2 = mu_jm2 * stry_jm2 + mu_jp1 * stry_jp1 + 3 * (mu_ijk * stry_j   + mu_jm1 * stry_jm1);
+329:         muy3 = mu_jm1 * stry_jm1 + mu_jp2 * stry_jp2 + 3 * (mu_jp1 * stry_jp1 + mu_ijk * stry_j  );
+330:         muy4 = mu_jp1 * stry_jp1 - tf * (mu_ijk * stry_j + mu_jp2 * stry_jp2);
+331:
+332:         r1 += stry_j * (muy1 * (shu[0][kthm2][tj-2][ti+0] - shu[0][kthm2][tj+0][ti+0]) +
+333:                         muy2 * (shu[0][kthm2][tj-1][ti+0] - shu[0][kthm2][tj+0][ti+0]) +
+334:                         muy3 * (shu[0][kthm2][tj+1][ti+0] - shu[0][kthm2][tj+0][ti+0]) +
+335:                         muy4 * (shu[0][kthm2][tj+2][ti+0] - shu[0][kthm2][tj+0][ti+0]));
+336:         r2 += stry_j * ((2 * muy1 + la_jm1 * stry_jm1 - tf * (la_ijk * stry_j + la_jm2 * stry_jm2)) *
+337:                         (shu[1][kthm2][tj-2][ti+0] - shu[1][kthm2][tj+0][ti+0]) +
+338:                         (2 * muy2 + la_jm2 * stry_jm2 + la_jp1 * stry_jp1 +
+339:                          3 * (la_ijk * stry_j   + la_jm1 * stry_jm1)) *
+340:                         (shu[1][kthm2][tj-1][ti+0] - shu[1][kthm2][tj+0][ti+0]) +
+341:                         (2 * muy3 + la_jm1 * stry_jm1 + la_jp2 * stry_jp2 +
+342:                          3 * (la_jp1 * stry_jp1 + la_ijk * stry_j  )) *
+343:                         (shu[1][kthm2][tj+1][ti+0] - shu[1][kthm2][tj+0][ti+0]) +
+344:                         (2 * muy4 + la_jp1 * stry_jp1 - tf * (la_ijk * stry_j  + la_jp2 * stry_jp2)) *
+345:                         (shu[1][kthm2][tj+2][ti+0] - shu[1][kthm2][tj+0][ti+0]));
+346:         r3 += stry_j  *(muy1 * (shu[2][kthm2][tj-2][ti+0] - shu[2][kthm2][tj+0][ti+0]) +
+347:                         muy2 * (shu[2][kthm2][tj-1][ti+0] - shu[2][kthm2][tj+0][ti+0]) +
+348:                         muy3 * (shu[2][kthm2][tj+1][ti+0] - shu[2][kthm2][tj+0][ti+0]) +
+349:                         muy4 * (shu[2][kthm2][tj+2][ti+0] - shu[2][kthm2][tj+0][ti+0]));
+350:       }
+351:
+352:       {
+353:         float_sw4 muz1, muz2, muz3, muz4;
+354:         muz1 = mu_km1 * strz_km1 - tf * (mu_ijk * strz_k + mu_km2 * strz_km2);
+355:         muz2 = mu_km2 * strz_km2 + mu_kp1 * strz_kp1 + 3 * (mu_ijk * strz_k   + mu_km1 * strz_km1);
+356:         muz3 = mu_km1 * strz_km1 + mu_kp2 * strz_kp2 + 3 * (mu_kp1 * strz_kp1 + mu_ijk * strz_k);
+357:         muz4 = mu_kp1 * strz_kp1 - tf * (mu_ijk * strz_k + mu_kp2 * strz_kp2);
+358:         r1 += strz_k * (muz1 * (shu[0][kthm4][tj+0][ti+0] - shu[0][kthm2][tj+0][ti+0]) +
+359:                         muz2 * (shu[0][kthm3][tj+0][ti+0] - shu[0][kthm2][tj+0][ti+0]) +
+360:                         muz3 * (shu[0][kthm1][tj+0][ti+0] - shu[0][kthm2][tj+0][ti+0]) +
+361:                         muz4 * (shu[0][kthm0][tj+0][ti+0] - shu[0][kthm2][tj+0][ti+0]));
+362:         r2 += strz_k * (muz1 * (shu[1][kthm4][tj+0][ti+0] - shu[1][kthm2][tj+0][ti+0]) +
+363:                         muz2 * (shu[1][kthm3][tj+0][ti+0] - shu[1][kthm2][tj+0][ti+0]) +
+364:                         muz3 * (shu[1][kthm1][tj+0][ti+0] - shu[1][kthm2][tj+0][ti+0]) +
+365:                         muz4 * (shu[1][kthm0][tj+0][ti+0] - shu[1][kthm2][tj+0][ti+0]));
+366:         r3 += strz_k * ((2 * muz1 + la_km1 * strz_km1 - tf * (la_ijk * strz_k + la_km2 * strz_km2)) *
+367:                         (shu[2][kthm4][tj+0][ti+0] - shu[2][kthm2][tj+0][ti+0]) +
+368:                         (2 * muz2 + la_km2 * strz_km2 + la_kp1 * strz_kp1 +
+369:                          3 * (la_ijk * strz_k   + la_km1 * strz_km1)) *
+370:                         (shu[2][kthm3][tj+0][ti+0] - shu[2][kthm2][tj+0][ti+0]) +
+371:                         (2 * muz3 + la_km1 * strz_km1 + la_kp2 * strz_kp2 +
+372:                          3 * (la_kp1 * strz_kp1 + la_ijk * strz_k  )) *
+373:                         (shu[2][kthm1][tj+0][ti+0] - shu[2][kthm2][tj+0][ti+0]) +
+374:                         (2 * muz4 + la_kp1 * strz_kp1 - tf * (la_ijk * strz_k + la_kp2 * strz_kp2)) *
+375:                         (shu[2][kthm0][tj+0][ti+0] - shu[2][kthm2][tj+0][ti+0]));
+376:       }
+377:       r1 *= i6;
+378:       r2 *= i6;
+379:       r3 *= i6;
+380:
+381:       r1 += strx_i  * stry_j * i144 *
+382:         (la_im2 * (shu[1][kthm2][tj-2][ti-2] - shu[1][kthm2][tj+2][ti-2] + 8 *
+383:                    (-shu[1][kthm2][tj-1][ti-2] + shu[1][kthm2][tj+1][ti-2])) - 8 *
+384:          (la_im1 * (shu[1][kthm2][tj-2][ti-1] - shu[1][kthm2][tj+2][ti-1] + 8 *
+385:                     (-shu[1][kthm2][tj-1][ti-1] + shu[1][kthm2][tj+1][ti-1]))) + 8 *
+386:          (la_ip1 * (shu[1][kthm2][tj-2][ti+1] - shu[1][kthm2][tj+2][ti+1] + 8 *
+387:                     (-shu[1][kthm2][tj-1][ti+1] + shu[1][kthm2][tj+1][ti+1]))) -
+388:          (la_ip2 * (shu[1][kthm2][tj-2][ti+2] - shu[1][kthm2][tj+2][ti+2] + 8 *
+389:                     (-shu[1][kthm2][tj-1][ti+2] + shu[1][kthm2][tj+1][ti+2]))))
+390:
+391:         + strx_i * strz_k * i144 *
+392:         (la_im2 * (shu[2][kthm4][tj+0][ti-2] - shu[2][kthm0][tj+0][ti-2] + 8 *
+393:                    (-shu[2][kthm3][tj+0][ti-2] + shu[2][kthm1][tj+0][ti-2])) - 8 *
+394:          (la_im1 * (shu[2][kthm4][tj+0][ti-1] - shu[2][kthm0][tj+0][ti-1] + 8 *
+395:                     (-shu[2][kthm3][tj+0][ti-1] + shu[2][kthm1][tj+0][ti-1]))) + 8 *
+396:          (la_ip1 * (shu[2][kthm4][tj+0][ti+1] - shu[2][kthm0][tj+0][ti+1] + 8 *
+397:                     (-shu[2][kthm3][tj+0][ti+1] + shu[2][kthm1][tj+0][ti+1]))) -
+398:          (la_ip2 * (shu[2][kthm4][tj+0][ti+2] - shu[2][kthm0][tj+0][ti+2] + 8 *
+399:                     (-shu[2][kthm3][tj+0][ti+2] + shu[2][kthm1][tj+0][ti+2]))))
+400:
+401:         + strx_i * stry_j * i144 *
+402:         (mu_jm2 * (shu[1][kthm2][tj-2][ti-2] - shu[1][kthm2][tj-2][ti+2] + 8 *
+403:                    (-shu[1][kthm2][tj-2][ti-1] + shu[1][kthm2][tj-2][ti+1])) - 8 *
+404:          (mu_jm1 * (shu[1][kthm2][tj-1][ti-2] - shu[1][kthm2][tj-1][ti+2] + 8 *
+405:                     (-shu[1][kthm2][tj-1][ti-1] + shu[1][kthm2][tj-1][ti+1]))) + 8 *
+406:          (mu_jp1 * (shu[1][kthm2][tj+1][ti-2] - shu[1][kthm2][tj+1][ti+2] + 8 *
+407:                     (-shu[1][kthm2][tj+1][ti-1] + shu[1][kthm2][tj+1][ti+1]))) -
+408:          (mu_jp2 * (shu[1][kthm2][tj+2][ti-2] - shu[1][kthm2][tj+2][ti+2] + 8 *
+409:                     (-shu[1][kthm2][tj+2][ti-1] + shu[1][kthm2][tj+2][ti+1]))))
+410:
+411:         + strx_i * strz_k * i144 *
+412:         (mu_km2 * (shu[2][kthm4][tj+0][ti-2] - shu[2][kthm4][tj+0][ti+2] + 8 *
+413:                    (-shu[2][kthm4][tj+0][ti-1] + shu[2][kthm4][tj+0][ti+1])) - 8 *
+414:          (mu_km1 * (shu[2][kthm3][tj+0][ti-2] - shu[2][kthm3][tj+0][ti+2] + 8 *
+415:                     (-shu[2][kthm3][tj+0][ti-1] + shu[2][kthm3][tj+0][ti+1]))) + 8 *
+416:          (mu_kp1 * (shu[2][kthm1][tj+0][ti-2] - shu[2][kthm1][tj+0][ti+2] + 8 *
+417:                     (-shu[2][kthm1][tj+0][ti-1] + shu[2][kthm1][tj+0][ti+1]))) -
+418:          (mu_kp2 * (shu[2][kthm0][tj+0][ti-2] - shu[2][kthm0][tj+0][ti+2] + 8 *
+419:                     (-shu[2][kthm0][tj+0][ti-1] + shu[2][kthm0][tj+0][ti+1]))));
+420:
+421:       r2 += strx_i  *stry_j  *i144*
+422:         (mu_im2 * (shu[0][kthm2][tj-2][ti-2] - shu[0][kthm2][tj+2][ti-2] + 8 *
+423:                    (-shu[0][kthm2][tj-1][ti-2] + shu[0][kthm2][tj+1][ti-2])) - 8 *
+424:          (mu_im1 * (shu[0][kthm2][tj-2][ti-1] - shu[0][kthm2][tj+2][ti-1] + 8 *
+425:                     (-shu[0][kthm2][tj-1][ti-1] + shu[0][kthm2][tj+1][ti-1]))) + 8 *
+426:          (mu_ip1 * (shu[0][kthm2][tj-2][ti+1] - shu[0][kthm2][tj+2][ti+1] + 8 *
+427:                     (-shu[0][kthm2][tj-1][ti+1] + shu[0][kthm2][tj+1][ti+1]))) -
+428:          (mu_ip2 * (shu[0][kthm2][tj-2][ti+2] - shu[0][kthm2][tj+2][ti+2] + 8 *
+429:                     (-shu[0][kthm2][tj-1][ti+2] + shu[0][kthm2][tj+1][ti+2]))))
+430:
+431:         + strx_i * stry_j * i144 *
+432:         (la_jm2 * (shu[0][kthm2][tj-2][ti-2] - shu[0][kthm2][tj-2][ti+2] + 8 *
+433:                    (-shu[0][kthm2][tj-2][ti-1] + shu[0][kthm2][tj-2][ti+1])) - 8 *
+434:          (la_jm1 * (shu[0][kthm2][tj-1][ti-2] - shu[0][kthm2][tj-1][ti+2] + 8 *
+435:                     (-shu[0][kthm2][tj-1][ti-1] + shu[0][kthm2][tj-1][ti+1]))) + 8 *
+436:          (la_jp1 * (shu[0][kthm2][tj+1][ti-2] - shu[0][kthm2][tj+1][ti+2] + 8 *
+437:                     (-shu[0][kthm2][tj+1][ti-1] + shu[0][kthm2][tj+1][ti+1]))) -
+438:          (la_jp2 * (shu[0][kthm2][tj+2][ti-2] - shu[0][kthm2][tj+2][ti+2] + 8 *
+439:                     (-shu[0][kthm2][tj+2][ti-1] + shu[0][kthm2][tj+2][ti+1]))))
+440:
+441:         + stry_j * strz_k * i144 *
+442:         (la_jm2 * (shu[2][kthm4][tj-2][ti+0] - shu[2][kthm0][tj-2][ti+0] + 8 *
+443:                    (-shu[2][kthm3][tj-2][ti+0] + shu[2][kthm1][tj-2][ti+0])) - 8 *
+444:          (la_jm1 * (shu[2][kthm4][tj-1][ti+0] - shu[2][kthm0][tj-1][ti+0] + 8 *
+445:                     (-shu[2][kthm3][tj-1][ti+0] + shu[2][kthm1][tj-1][ti+0]))) + 8 *
+446:          (la_jp1 * (shu[2][kthm4][tj+1][ti+0] - shu[2][kthm0][tj+1][ti+0] + 8 *
+447:                     (-shu[2][kthm3][tj+1][ti+0] + shu[2][kthm1][tj+1][ti+0]))) -
+448:          (la_jp2 * (shu[2][kthm4][tj+2][ti+0] - shu[2][kthm0][tj+2][ti+0] + 8 *
+449:                     (-shu[2][kthm3][tj+2][ti+0] + shu[2][kthm1][tj+2][ti+0]))))
+450:
+451:         + stry_j * strz_k * i144 *
+452:         (mu_km2 * (shu[2][kthm4][tj-2][ti+0] - shu[2][kthm4][tj+2][ti+0] + 8 *
+453:                    (-shu[2][kthm4][tj-1][ti+0] + shu[2][kthm4][tj+1][ti+0])) - 8 *
+454:          (mu_km1 * (shu[2][kthm3][tj-2][ti+0] - shu[2][kthm3][tj+2][ti+0] + 8 *
+455:                     (-shu[2][kthm3][tj-1][ti+0] + shu[2][kthm3][tj+1][ti+0]))) + 8 *
+456:          (mu_kp1 * (shu[2][kthm1][tj-2][ti+0] - shu[2][kthm1][tj+2][ti+0] + 8 *
+457:                     (-shu[2][kthm1][tj-1][ti+0] + shu[2][kthm1][tj+1][ti+0]))) -
+458:          (mu_kp2 * (shu[2][kthm0][tj-2][ti+0] - shu[2][kthm0][tj+2][ti+0] + 8 *
+459:                     (-shu[2][kthm0][tj-1][ti+0] + shu[2][kthm0][tj+1][ti+0]))));
+460:
+461:       r3 += strx_i * strz_k * i144 *
+462:         (mu_im2 * (shu[0][kthm4][tj+0][ti-2] - shu[0][kthm0][tj+0][ti-2] + 8 *
+463:                    (-shu[0][kthm3][tj+0][ti-2] + shu[0][kthm1][tj+0][ti-2])) - 8 *
+464:          (mu_im1 * (shu[0][kthm4][tj+0][ti-1] - shu[0][kthm0][tj+0][ti-1] + 8 *
+465:                     (-shu[0][kthm3][tj+0][ti-1] + shu[0][kthm1][tj+0][ti-1]))) + 8 *
+466:          (mu_ip1 * (shu[0][kthm4][tj+0][ti+1] - shu[0][kthm0][tj+0][ti+1] + 8 *
+467:                     (-shu[0][kthm3][tj+0][ti+1] + shu[0][kthm1][tj+0][ti+1]))) -
+468:          (mu_ip2 * (shu[0][kthm4][tj+0][ti+2] - shu[0][kthm0][tj+0][ti+2] + 8 *
+469:                     (-shu[0][kthm3][tj+0][ti+2] + shu[0][kthm1][tj+0][ti+2]))))
+470:
+471:         + stry_j  *strz_k*i144*
+472:         (mu_jm2 * (shu[1][kthm4][tj-2][ti+0] - shu[1][kthm0][tj-2][ti+0] + 8 *
+473:                    (- shu[1][kthm3][tj-2][ti+0]+shu[1][kthm1][tj-2][ti+0])) - 8 *
+474:          (mu_jm1 * (shu[1][kthm4][tj-1][ti+0] - shu[1][kthm0][tj-1][ti+0] + 8 *
+475:                     (- shu[1][kthm3][tj-1][ti+0]+shu[1][kthm1][tj-1][ti+0]))) + 8 *
+476:          (mu_jp1 * (shu[1][kthm4][tj+1][ti+0] - shu[1][kthm0][tj+1][ti+0] + 8 *
+477:                     (- shu[1][kthm3][tj+1][ti+0]+shu[1][kthm1][tj+1][ti+0]))) -
+478:          (mu_jp2 * (shu[1][kthm4][tj+2][ti+0] - shu[1][kthm0][tj+2][ti+0] + 8 *
+479:                     (- shu[1][kthm3][tj+2][ti+0]+shu[1][kthm1][tj+2][ti+0]))))
+480:
+481:         + strx_i  *strz_k*i144*
+482:         (la_km2*(shu[0][kthm4][tj+0][ti-2] - shu[0][kthm4][tj+0][ti+2] + 8 *
+483:                  (- shu[0][kthm4][tj+0][ti-1]+shu[0][kthm4][tj+0][ti+1])) - 8*
+484:          (la_km1*(shu[0][kthm3][tj+0][ti-2] - shu[0][kthm3][tj+0][ti+2] + 8 *
+485:                   (- shu[0][kthm3][tj+0][ti-1]+shu[0][kthm3][tj+0][ti+1]))) + 8*
+486:          (la_kp1*(shu[0][kthm1][tj+0][ti-2] - shu[0][kthm1][tj+0][ti+2] + 8 *
+487:                   (- shu[0][kthm1][tj+0][ti-1]+shu[0][kthm1][tj+0][ti+1]))) -
+488:          (la_kp2*(shu[0][kthm0][tj+0][ti-2] - shu[0][kthm0][tj+0][ti+2] + 8 *
+489:                   (- shu[0][kthm0][tj+0][ti-1]+shu[0][kthm0][tj+0][ti+1]))))
+490:
+491:         + stry_j  *strz_k*i144*
+492:         (la_km2*(shu[1][kthm4][tj-2][ti+0] - shu[1][kthm4][tj+2][ti+0] + 8 *
+493:                  (- shu[1][kthm4][tj-1][ti+0]+shu[1][kthm4][tj+1][ti+0])) - 8*
+494:          (la_km1*(shu[1][kthm3][tj-2][ti+0] - shu[1][kthm3][tj+2][ti+0] + 8 *
+495:                   (- shu[1][kthm3][tj-1][ti+0]+shu[1][kthm3][tj+1][ti+0]))) + 8*
+496:          (la_kp1*(shu[1][kthm1][tj-2][ti+0] - shu[1][kthm1][tj+2][ti+0] + 8 *
+497:                   (- shu[1][kthm1][tj-1][ti+0]+shu[1][kthm1][tj+1][ti+0]))) -
+498:          (la_kp2*(shu[1][kthm0][tj-2][ti+0] - shu[1][kthm0][tj+2][ti+0] + 8 *
+499:                   (- shu[1][kthm0][tj-1][ti+0]+shu[1][kthm0][tj+1][ti+0]))));
+500:
+501:       if (pred) {
+502:
+503:         int idx = k * nij + j * ni + i;
+504:         float_sw4 fact = dt*dt / rho;
+505:         up(0,idx) = 2 * shu[0][kthm2][tj][ti] - um0 + fact * (cof * r1 + fo0);
+506:         up(1,idx) = 2 * shu[1][kthm2][tj][ti] - um1 + fact * (cof * r2 + fo1);
+507:         up(2,idx) = 2 * shu[2][kthm2][tj][ti] - um2 + fact * (cof * r3 + fo2);
+508:       }
+509:       else {
+510:
+511:         int idx = k * nij + j * ni + i;
+512:         float_sw4 fact = dt*dt*dt*dt / (12 * rho);
+513:         up(0,idx) = up0 + fact * (cof * r1 + fo0);
+514:         up(1,idx) = up1 + fact * (cof * r2 + fo1);
+515:         up(2,idx) = up2 + fact * (cof * r3 + fo2);
+516:       }
+517:
+518:       strz_km2 = strz_km1;
+519:       strz_km1 = strz_k;
+520:       strz_k = strz_kp1;
+521:       strz_kp1 = strz_kp2;
+522:
+523:       la_km2 = la_km1;
+524:       la_km1 = la_ijk;
+525:       la_ijk = la_kp1;
+526:       la_kp1 = la_kp2;
+527:
+528:       mu_km2 = mu_km1;
+529:       mu_km1 = mu_ijk;
+530:       mu_ijk = mu_kp1;
+531:       mu_kp1 = mu_kp2;
+532:
+533:     }
+534:
+535:     index += nij;
+536:
+537:   }
+538: }
+```cpp```
+# End Source Code
+# Begin Performance Analysis
+
+### COUNTER SUMMARY RHS4_V2 (CONFIGURED):
+[
+  {
+    "Kernel": "void_rhs4_v2<0__0>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double__double)",
+    "Group Name": "lts_",
+    "Counter Name": "lts__t_sector_hit_rate.pct",
+    "Value": 0.3511530029879547,
+    "Description": "Cache sector-level hit rate in the LTS subsystem."
+  },
+  {
+    "Kernel": "void_rhs4_v2<0__0>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double__double)",
+    "Group Name": "lts_",
+    "Counter Name": "lts__t_sectors_data_ecc.avg.pct_of_peak_sustained_elapsed",
+    "Value": 0.31355902233339816,
+    "Description": "Memory sectors accessed, Percentage of peak sustained hardware capability, Store instructions in the LTS subsystem."
+  },
+  {
+    "Kernel": "void_rhs4_v2<0__0>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double__double)",
+    "Group Name": "smsp_",
+    "Counter Name": "smsp__average_warps_issue_stalled_lg_throttle_per_issue_active.ratio",
+    "Value": 0.3351650065547299,
+    "Description": "Store instructions, Time or events where execution was stalled in the SMSP subsystem."
+  },
+  {
+    "Kernel": "void_rhs4_v2<0__1>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double__double)",
+    "Group Name": "lts_",
+    "Counter Name": "lts__t_sector_hit_rate.pct",
+    "Value": 0.35115292662822656,
+    "Description": "Cache sector-level hit rate in the LTS subsystem."
+  },
+  {
+    "Kernel": "void_rhs4_v2<0__1>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double__double)",
+    "Group Name": "smsp_",
+    "Counter Name": "smsp__average_warp_latency_per_inst_issued.ratio",
+    "Value": 0.3135588596743201,
+    "Description": "Average latency observed for a given operation, Number of instructions issued to the pipeline, Store instructions in the SMSP subsystem."
+  },
+  {
+    "Kernel": "void_rhs4_v2<0__1>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double__double)",
+    "Group Name": "smsp_",
+    "Counter Name": "smsp__average_warps_active_per_inst_executed.ratio",
+    "Value": 0.3351554181096033,
+    "Description": "Number of instructions executed, Store instructions in the SMSP subsystem."
+  },
+  {
+    "Kernel": "void_rhs4_v2<1__0>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double__double)",
+    "Group Name": "thread_",
+    "Counter Name": "thread_inst_executed_true",
+    "Value": 0.27455528388527844,
+    "Description": "Unknown or malformed counter name."
+  },
+  {
+    "Kernel": "void_rhs4_v2<1__0>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double__double)",
+    "Group Name": "sm_",
+    "Counter Name": "sm__cycles_active.avg",
+    "Value": 0.2816748893986701,
+    "Description": "Cycles during which the unit was actively performing work in the SM subsystem."
+  },
+  {
+    "Kernel": "void_rhs4_v2<1__0>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double__double)",
+    "Group Name": "sass_",
+    "Counter Name": "sass__inst_executed_shared_loads",
+    "Value": 0.28812685782613306,
+    "Description": "Number of instructions executed, Reduction operations, Shared memory accesses, Store instructions in the SASS subsystem."
+  },
+  {
+    "Kernel": "void_rhs4_v2<1__1>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double__double)",
+    "Group Name": "thread_",
+    "Counter Name": "thread_inst_executed_true",
+    "Value": 0.2743628420634884,
+    "Description": "Unknown or malformed counter name."
+  },
+  {
+    "Kernel": "void_rhs4_v2<1__1>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double__double)",
+    "Group Name": "sm_",
+    "Counter Name": "sm__mio2rf_writeback_active.max.pct_of_peak_sustained_elapsed",
+    "Value": 0.28792267417739226,
+    "Description": "None"
+  },
+  {
+    "Kernel": "void_rhs4_v2<1__1>(int__int__int__int__int__int__int__int__int__double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__const_double_*__double__double)",
+    "Group Name": "sm_",
+    "Counter Name": "sm__ops_path_tensor_op_hgmma_src_bf16_dst_fp32_sparsity_off.max.peak_sustained_elapsed.per_second",
+    "Value": 0.28147632429569447,
+    "Description": "None"
+  }
+]
+
+# End Performance Analysis
+
+
+# Begin H100 Optimization Guidance
+Optimize specifically for NVIDIA H100 (Hopper) by targeting L2/cache reuse, HBM3 bandwidth, and Tensor Core throughput. Prioritize tiling and data locality: make global accesses coalesced/contiguous, reuse data from registers/shared memory/L2, and reduce redundant global traffic. Use Hopper async pipelines to hide memory latency: stage global→shared with cp.async / cuda::memcpy_async using double/triple buffering so loads overlap compute; keep the pipeline full instead of blocking on loads. If compute is matrix/attention-like, map work to Tensor Cores (WMMA/CUTLASS/cuBLASLt) and use mixed precision (FP16/BF16/TF32, FP8 when numerically safe) to increase throughput. Tune launch configuration to avoid occupancy cliffs: pick block sizes that sustain high occupancy without excessive register pressure or shared-memory usage; avoid large per-thread local arrays that cause spills. Reduce warp inefficiency: minimize divergence, expensive atomics, and unnecessary __syncthreads(); prefer warp-level primitives and cooperative groups where applicable. If memory-bound, reduce passes and consider fusion/batching to increase L2 hit rate; if compute-bound, increase ILP, unroll judiciously, and favor FMA-friendly instruction patterns.
+# End H100 Optimization Guidance
+
+# Begin Entrypoint Guardrails
+Entrypoint guardrails:
+1. The source does not contain a main() definition. Do NOT introduce one.
+2. Do NOT add wrapper executables, test harnesses, helper mains, or alternate standalone programs.
+3. Keep the existing top-level program structure intact; only optimize within the existing file structure.
+4. Do NOT change externally referenced function names or break linkage between existing declarations and definitions.
+# End Entrypoint Guardrails
+# Instructions
+You must optimize the source code provided above using only the performance data provided above. 
+
+Optimize the following HPC code for execution time.
+Can you give me the fixed optimized code that will replace the full source code including headers and main function body?
+2. Do not add line numbers to the generated code. 
+3. Do not rename or duplicate any kernel or function.
+4. Do not change any function signatures.
+5. Preserve the existing entry-point structure exactly. If the file already has main(), keep exactly one equivalent main(); if it does not, do not add one.
+6. Do not add duplicate definitions for main or for any externally linked function.
+7. Do not turn declarations into disconnected definitions or break declaration/definition linkage.
+5. Use the performance analysis reference number(s) to guide your changes.
+8. Return:
+   (a) the full source code including the optimized kernels inside ``` block (starts with ``` and ends with ``` )
+   (b) optimizations list = [{'lines': [...], 'reason': '...'}]
+   (c) suggested_but_not_applied list = [{'lines': [...], 'reason': '...'}]
+9. Do not generate more than one copy of the same kernel.
+10. Do not invent any new kernels or placeholder code.
+
+ONLY respond with the updated code and two structured lists. No explanation, no notes, no markdown titles. Follow this format exactly.

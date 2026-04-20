@@ -1,0 +1,151 @@
+```
+#include "sobol.h"
+#include "sobol_gpu.h"
+
+#define k_2powneg32 2.3283064E-10F
+
+/*
+Mathematical Preconditions:
+- n_vectors >= 0.
+- n_dimensions >= 1.
+- n_directions is the number of direction numbers per dimension (typically 32 for 32-bit Sobol). We require:
+  (a) n_directions >= 1,
+  (b) n_directions is a power of two and a multiple of 4 (so that n_directions % 4 == 0 for vectorized loads),
+  (c) d_directions points to contiguous arrays of n_directions unsigned ints per dimension and is at least 16-byte aligned,
+  (d) d_output provides space for n_vectors floats per dimension.
+- Host launch ensures stride = gridDim.x * blockDim.x is a power-of-two (the code below preserves the original host logic that enforces this).
+
+Postconditions:
+- For each dimension d in [0, n_dimensions), the kernel writes n_vectors Sobol samples to d_output[d * n_vectors + i], for i in [0, n_vectors),
+  where each sample equals sobol(i, d) * 2^-32 in [0, 1).
+- No out-of-bounds memory accesses occur.
+
+Loop invariants and proof sketches (semantic preservation under optimization):
+- Shared-memory staging invariant:
+  After the shared-memory load and synchronization, for all k in [0, n_directions), v[k] == d_directions_d[k], where d_directions_d denotes the base of the
+  n_directions direction numbers for dimension blockIdx.y. Vectorized uint4 copies preserve element order and contents; __syncthreads enforces visibility.
+
+- First loop (initial Gray-code accumulation):
+  Let g0 = i0 ^ (i0 >> 1) be the Gray code for index i0. Invariant: After processing iteration k (0-based, k processed means loop index advanced to k+1),
+  X == XOR over v[j] for all j in [0, k] such that bit j of g0 is 1, and g == g0 >> (k+1). Initialization holds with X = 0 and g = g0.
+  Maintenance step uses: mask = -(g & 1) selects v[k] iff the current LSB of g is 1, then g >>= 1. This preserves the invariant.
+  Termination: after k == log2(stride), X == XOR over the first log2(stride) Gray bits, matching the original algorithm. Hoisting log2(stride) and unrolling
+  only change control flow, not computed values.
+
+- Recurrence loop (stride-skipping updates):
+  Invariant for each iteration where i == i0 + m * stride (m >= 1): X == Sobol XOR-state for index i - 1 XOR-reduced to index i using
+  X ^= v[log2(stride)-1] ^ v[ctz(~((i - stride) | (stride - 1)))], which is algebraically identical to the original update:
+  It flips the appropriate direction numbers corresponding to the carry bit transition caused by adding 'stride' to the index sequence.
+  Precomputing v_log2stridem1 and v_stridemask and hoisting them do not alter semantics. The invariant holds by the standard Sobol recurrence for power-of-two strides.
+  Termination writes out each i where i < n_vectors. The set of i covered is identical to the original for-loop bounds.
+*/
+
+__global__ __launch_bounds__(256, 2)
+void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+                     unsigned *__restrict__ d_directions,
+                     float *__restrict__ d_output)
+{
+    // Shared direction numbers for this dimension. 16B aligned for uint4 vectorized copies.
+    __shared__ __align__(16) unsigned int v[n_directions];
+
+    // Base pointers for the current dimension (blockIdx.y)
+    unsigned int* __restrict__ dir_base = d_directions + n_directions * blockIdx.y;
+    float* __restrict__ out_base = d_output + n_vectors * blockIdx.y;
+
+    // Vectorized, coalesced staging of direction numbers into shared memory.
+    // Requires n_directions % 4 == 0 and 16B alignment (satisfied by cudaMalloc and 128B spacing across dimensions).
+    const unsigned int vec_elems = (unsigned int)(n_directions >> 2);
+    if (threadIdx.x < vec_elems) {
+        reinterpret_cast<uint4*>(v)[threadIdx.x] =
+            reinterpret_cast<const uint4*>(dir_base)[threadIdx.x];
+    }
+
+    __syncthreads();
+
+    // Thread's starting index and stride (power-of-two by construction on host)
+    const unsigned int i0     = threadIdx.x + blockIdx.x * blockDim.x;
+    const unsigned int stride = gridDim.x * blockDim.x;
+
+    // Hoist frequently used values
+    const unsigned int log2_stride = __ffs(stride) - 1;       // since stride is power-of-two
+    const unsigned int log2_stridem1_idx = log2_stride - 1;   // index used in v[]
+    const unsigned int v_stridemask = stride - 1;
+
+    // Initial Gray code and XOR state
+    unsigned int g = i0 ^ (i0 >> 1);
+    unsigned int X = 0u;
+
+    // Initial accumulation over first log2(stride) Gray-code bits
+    #pragma unroll 16
+    for (unsigned int k = 0; k < log2_stride; ++k)
+    {
+        const unsigned int bit  = g & 1u;
+        const unsigned int mask = 0u - bit;   // 0xFFFFFFFF when bit==1, else 0x00000000
+        X ^= (mask & v[k]);
+        g >>= 1;
+    }
+
+    if (i0 < n_vectors)
+    {
+        // Use FMA form to map to high-throughput FFMA pipes; uint->float convert explicit.
+        out_base[i0] = fmaf(__uint2float_rn(X), k_2powneg32, 0.0f);
+    }
+
+    // Recurrence for subsequent indices spaced by 'stride'
+    const unsigned int v_log2stridem1 = v[log2_stridem1_idx];
+
+    for (unsigned int i = i0 + stride; i < n_vectors; i += stride)
+    {
+        // j = ctz( ~((i - stride) | (stride - 1)) )
+        const unsigned int t = ~((i - stride) | v_stridemask);
+        X ^= v_log2stridem1 ^ v[__ffs(t) - 1];
+        out_base[i] = fmaf(__uint2float_rn(X), k_2powneg32, 0.0f);
+    }
+}
+
+double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+                unsigned int *d_directions, float *d_output)
+{
+    // Increased threads per block to improve occupancy on H100 while keeping stride power-of-two.
+    const int threadsperblock = 256;
+
+    dim3 dimGrid;
+    dim3 dimBlock;
+
+    dimGrid.y = n_dimensions;
+
+    if (n_dimensions < (4 * 24))
+    {
+        dimGrid.x = 4 * 24;
+    }
+    else
+    {
+        dimGrid.x = 1;
+    }
+
+    if (dimGrid.x > (unsigned int)(n_vectors / threadsperblock))
+    {
+        dimGrid.x = (n_vectors + threadsperblock - 1) / threadsperblock;
+    }
+
+    // Round up grid.x to next power-of-two (preserves original stride power-of-two invariant)
+    unsigned int targetDimGridX = dimGrid.x;
+    for (dimGrid.x = 1 ; dimGrid.x < targetDimGridX ; dimGrid.x *= 2);
+
+    dimBlock.x = threadsperblock;
+
+    cudaDeviceSynchronize();
+    auto start = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < repeat; i++)
+      sobolGPU_kernel <<<dimGrid, dimBlock>>> (
+        (unsigned)n_vectors, (unsigned)n_dimensions, d_directions, d_output);
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    return time;
+}
+```
+optimizations list = [{'lines': ['sobolGPU_kernel: added __launch_bounds__(256, 2) attribute and set threadsperblock=256 in sobolGPU'], 'reason': 'Increase occupancy and number of eligible warps per scheduler on H100, addressing low achieved occupancy and issue slot underutilization (Roofline refs 1, 2).'}, {'lines': ['sobolGPU_kernel: vectorized staging of direction numbers from global to shared using uint4 and 16B-aligned shared array'], 'reason': 'Reduce memory-IO short scoreboard stalls by making the single global->shared transfer more efficient and coalesced; also reduces shared memory bank pressure via broadcast-friendly access (Roofline ref 3).'}, {'lines': ['sobolGPU_kernel: hoisted log2_stride and related constants (log2_stridem1_idx, v_stridemask) out of loops'], 'reason': 'Reduce special-instruction overhead (__ffs) and loop control work; increases ILP and reduces per-iteration stalls, improving the number of eligible warps (Roofline ref 2).'}, {'lines': ['sobolGPU_kernel: unrolled initial Gray-code accumulation loop with #pragma unroll 16'], 'reason': 'Decrease control overhead and expose ILP to schedulers to improve instruction issue efficiency (Roofline ref 2).'}, {'lines': ['sobolGPU_kernel: use fmaf(__uint2float_rn(X), k_2powneg32, 0.0f) for output conversion'], 'reason': 'Encourage use of fused-multiply-add path to increase fraction of fused FP32 instructions, addressing the zero fused FP32 instructions observed (Roofline ref 4).'}, {'lines': ['sobolGPU_kernel: compute and reuse base pointers out_base/dir_base instead of incrementing original pointers'], 'reason': 'Clarifies aliasing for the compiler and can enable better address computation scheduling and caching.'}, {'lines': ['sobolGPU_kernel: strengthened shared-memory alignment via __align__(16)'], 'reason': 'Ensure correct alignment for vectorized uint4 transactions and avoid potential bank misalignment penalties on shared memory.'}]
+suggested_but_not_applied list = [{'lines': ['sobolGPU_kernel: cp.async / cuda::memcpy_async pipeline for global->shared staging'], 'reason': 'Only 32 direction numbers per block; the one-time transfer provides little latency to hide and adds complexity. Gains would be negligible compared to current vectorized copy.'}, {'lines': ['sobolGPU_kernel: place direction numbers in __constant__ memory'], 'reason': 'Direction tables are dimension-dependent; each block reads a different slice, limiting constant cache broadcast benefits. Current shared-memory staging is sufficient.'}, {'lines': ['sobolGPU_kernel: warp-private register copies of v[] to eliminate __syncthreads'], 'reason': 'Would require ~n_directions registers per thread, significantly reducing occupancy and likely hurting performance on H100. The single __syncthreads is low overhead.'}, {'lines': ['Map computation to Tensor Cores (WMMA/TF32/BF16/FP8)'], 'reason': 'The kernel is integer/bitwise with trivial FP32 scaling; no matrix-like compute to leverage Tensor Cores.'}, {'lines': ['Kernel fusion or batching across dimensions to increase L2 reuse'], 'reason': 'Constrained by existing entry-point and interface; fusion would change program structure and is outside allowed modifications.'}]

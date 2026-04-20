@@ -1,0 +1,171 @@
+```
+#include "sobol.h"
+#include "sobol_gpu.h"
+#include <cuda_runtime.h>
+#include <chrono>
+
+#define k_2powneg32 2.3283064E-10F
+
+// Mathematical correctness notes for sobolGPU_kernel:
+// Preconditions:
+// - n_vectors >= 0, n_dimensions >= 0.
+// - gridDim.y == n_dimensions.
+// - n_directions is the fixed number of Sobol direction numbers per dimension (e.g., 32) defined in sobol.h.
+// - d_directions points to an array of at least n_dimensions * n_directions 32-bit unsigned direction numbers,
+//   laid out dimension-major: for dimension d in [0, n_dimensions), its direction vector starts at
+//   d_directions + d * n_directions.
+// - d_output points to an array of at least n_dimensions * n_vectors floats, laid out dimension-major:
+//   dimension d's output slice starts at d_output + d * n_vectors.
+// - The host establishes gridDim.x * blockDim.x (stride) as a power-of-two (as enforced by sobolGPU).
+//
+// Postconditions:
+// - For each dimension d in [0, n_dimensions) and index i in [0, n_vectors), d_output[d*n_vectors + i]
+//   equals Sobol(i) scaled to [0,1) using the provided direction vector for dimension d.
+//
+// Loop invariants and proof sketches ensuring semantic equivalence:
+//
+// 1) Initialization loop over k in [0, log2(stride)):
+//    Invariant I1(k): After processing iteration k (0-based, exclusive bound), let g0 = (i0 ^ (i0 >> 1)).
+//      - g == g0 >> k.
+//      - X == XOR over all j in [0, k) of ( (g0 & (1u << j)) ? v[j] : 0 ).
+//    Base: For k=0, before loop, g == g0, X == 0, holds vacuously.
+//    Step: Assume holds for k; on iteration k we set mask = -(g & 1) which equals 0xFFFFFFFF iff bit k of g0 is 1,
+//          else 0. Then X ^= (mask & v[k]) equals conditionally XOR by v[k]. We then shift g >>= 1; therefore
+//          new g == g0 >> (k+1). Hence I1(k+1) holds.
+//
+// 2) Strided progression loop for i = i0 + t*stride, t >= 1:
+//    Let log2_stride = log2(stride). Define the standard Sobol Gray-code recurrence:
+//    Sobol(i) = Sobol(i - 1) ^ v[ctz(i)] where ctz is count of trailing zeros.
+//    For a power-of-two stride S, moving from i-S to i flips exactly the bit (log2(S)-1) and one additional bit
+//    indexed by idx = __ffs(~(((i - S) | (S - 1)))) - 1, so:
+//       Sobol(i) = Sobol(i - S) ^ v[log2(S)-1] ^ v[idx].
+//    Invariant I2(t): At loop top with i == i0 + t*stride, X == Sobol(i - stride).
+//    Base: After initialization and first store (for i0), X == Sobol(i0). For the first loop iteration (t=1),
+//          i == i0 + stride, so invariant I2(1) holds with X == Sobol(i - stride).
+//    Step: Given I2(t), we compute idx as above and update X ^= v[log2_stride-1] ^ v[idx], so X == Sobol(i).
+//          After storing at i, we increment i by stride; thus at next top, X == Sobol(i - stride) and I2(t+1) holds.
+//
+// Structural optimizations preserve these invariants:
+// - Shared memory layout is changed to conflict-free column-major duplication, but values v[j] remain identical.
+// - Replacement of stores with streaming L2-cached stores does not affect computed values or order, only cache policy.
+// - Precomputations of constants (log2_stride, masks) and loop unrolling do not change semantics.
+
+__device__ __forceinline__ void store_cg(float* addr, float val) {
+#if defined(__CUDA_ARCH__)
+    // Streaming, cache-at-global (bypass L1/TEX) to reduce L1TEX->XBAR write pressure on H100
+    asm volatile("st.global.cg.f32 [%0], %1;" :: "l"(addr), "f"(val));
+#else
+    *addr = val;
+#endif
+}
+
+__global__
+void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+                     unsigned *__restrict__ d_directions,
+                     float *__restrict__ d_output)
+{
+    // Alias dimension slice pointers
+    const unsigned dim = blockIdx.y;
+    unsigned *__restrict__ dir_base = d_directions + (size_t)n_directions * dim;
+    float *__restrict__ out_base    = d_output     + (size_t)n_vectors    * dim;
+
+    // Conflict-free shared memory duplication:
+    // Layout v_pad[j * 32 + lane] == v[j] for all lane in [0,31].
+    // This ensures lane-private bank for any index j, eliminating bank conflicts.
+    __shared__ unsigned v_pad[n_directions * 32];
+
+    const unsigned lane = threadIdx.x & 31u;
+
+    // Initialize v_pad using the first warp only
+    if (threadIdx.x < 32) {
+        #pragma unroll
+        for (unsigned j = 0; j < n_directions; ++j) {
+            unsigned val = dir_base[j];
+            v_pad[j * 32 + lane] = val;
+        }
+    }
+
+    __syncthreads();
+
+    const int i0     = threadIdx.x + blockIdx.x * blockDim.x;
+    const int stride = gridDim.x * blockDim.x;
+
+    // Precompute constants to avoid recomputation and MIO scoreboard stalls
+    const unsigned ffs_stride = __ffs(stride);           // stride is power-of-two
+    const unsigned log2_stride = (ffs_stride > 0 ? ffs_stride - 1 : 0);
+    const unsigned v_log2stridem1 = (log2_stride ? v_pad[(log2_stride - 1) * 32 + lane] : 0u);
+    const unsigned v_stridemask = (unsigned)(stride - 1);
+
+    // Initial Gray code index and accumulator
+    unsigned g = ((unsigned)i0) ^ ((unsigned)i0 >> 1);
+    unsigned X = 0;
+
+    // Loop invariant I1 applied here; unrolled for ILP and fewer MIO scoreboard stalls
+    #pragma unroll
+    for (unsigned k = 0; k < log2_stride; ++k) {
+        unsigned mask = -(g & 1u);
+        unsigned vk = v_pad[k * 32 + lane];
+        X ^= (mask & vk);
+        g >>= 1;
+    }
+
+    if ((unsigned)i0 < n_vectors) {
+        float val = (float)X * k_2powneg32;
+        store_cg(out_base + i0, val);
+    }
+
+    // Strided generation; invariant I2 holds at the loop top
+    for (unsigned i = (unsigned)(i0 + stride); i < n_vectors; i += (unsigned)stride) {
+        // Compute idx = ctz( ~((i - stride) | (stride - 1)) )
+        unsigned t = ((i - (unsigned)stride) | v_stridemask);
+        unsigned idx = __ffs(~t) - 1;
+        X ^= (v_log2stridem1 ^ v_pad[idx * 32 + lane]);
+        float val = (float)X * k_2powneg32;
+        store_cg(out_base + i, val);
+    }
+}
+
+double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+                unsigned int *d_directions, float *d_output)
+{
+    // Increased threads per block to hide latency and raise achieved occupancy on H100
+    const int threadsperblock = 256;
+
+    dim3 dimGrid;
+    dim3 dimBlock;
+
+    dimGrid.y = n_dimensions;
+
+    if (n_dimensions < (4 * 24)) {
+        dimGrid.x = 4 * 24;
+    } else {
+        dimGrid.x = 1;
+    }
+
+    if (dimGrid.x > (unsigned int)(n_vectors / threadsperblock)) {
+        dimGrid.x = (n_vectors + threadsperblock - 1) / threadsperblock;
+    }
+
+    unsigned int targetDimGridX = dimGrid.x;
+    for (dimGrid.x = 1 ; dimGrid.x < targetDimGridX ; dimGrid.x *= 2);
+
+    dimBlock.x = threadsperblock;
+
+    // Prefer shared memory to reduce L1/TEX pressure (helps reduce l1tex->xbar write stress)
+    cudaFuncSetCacheConfig(sobolGPU_kernel, cudaFuncCachePreferShared);
+
+    cudaDeviceSynchronize();
+    auto start = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < repeat; i++)
+        sobolGPU_kernel <<<dimGrid, dimBlock>>> (
+            (unsigned)n_vectors, (unsigned)n_dimensions, d_directions, d_output);
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    return time;
+}
+```
+optimizations list = [{'lines': ['sobolGPU_kernel: introduced conflict-free shared memory layout v_pad[j*32 + lane] with per-lane columns; first warp duplicates direction numbers into v_pad; replaced all v[k] reads with v_pad[k*32 + lane]'], 'reason': 'Reduces shared-memory bank conflicts that cause short scoreboard stalls (Roofline: 44.8% cycles stalled on MIO/SMEM).'}, {'lines': ['sobolGPU_kernel: added store_cg device inline using st.global.cg.f32 and used it for all stores to d_output'], 'reason': 'Reduces L1TEX->XBAR write traffic by bypassing L1 and caching at L2, addressing high l1tex__m_l1tex2xbar_write_bytes and dram__bytes_write pressure.'}, {'lines': ['sobolGPU_kernel: hoisted __ffs(stride) and related expressions into log2_stride, v_log2stridem1, v_stridemask'], 'reason': 'Cuts repeated special-instruction/MIO dependencies, improving eligible warps per cycle.'}, {'lines': ['sobolGPU_kernel: applied #pragma unroll to the small initialization loop over k < log2_stride'], 'reason': 'Increases ILP and reduces loop overhead for FP32 and integer ops, improving issue efficiency.'}, {'lines': ['sobolGPU: increased threadsperblock from 64 to 256'], 'reason': 'Raises achieved occupancy on H100 to better hide memory latency given low measured occupancy (25.6%).'}, {'lines': ['sobolGPU: set cudaFuncSetCacheConfig(sobolGPU_kernel, cudaFuncCachePreferShared)'], 'reason': 'Shifts cache carveout toward shared memory to complement the shared-memory-centric kernel, mitigating L1TEX pressure highlighted in counters.'}, {'lines': ['sobolGPU_kernel: precomputed out_base and dir_base per dimension; removed pointer arithmetic inside inner loops'], 'reason': 'Reduces address-calculation overhead and dependency chains, improving scheduler issue rate.'}] 
+suggested_but_not_applied list = [{'lines': ['sobolGPU_kernel: cp.async/cuda::memcpy_async pipeline for d_directions -> shared'], 'reason': 'Direction table per dimension is tiny (n_directions ~ 32); async pipeline overhead would dominate and not improve latency amortization.'}, {'lines': ['sobolGPU_kernel: vectorized global stores (float2/float4)'], 'reason': 'Would require strict 8/16-byte alignment and size-multiple guarantees for n_vectors; unsafe to assume and could misalign slices across dimensions.'}, {'lines': ['sobolGPU_kernel: move direction vectors to __constant__ memory'], 'reason': 'Requires changing global storage and linkage across translation units; could break external build/link expectations and violates guardrails about not changing externally referenced symbols.'}, {'lines': ['sobolGPU_kernel: warp-shuffle broadcasts to eliminate all shared accesses'], 'reason': 'Second loop uses per-thread-varying indices into v; shuffles cannot provide all distinct elements simultaneously without serializing, negating benefits.'}, {'lines': ['sobolGPU: cudaFuncSetAttribute PreferredSharedMemoryCarveout'], 'reason': 'Not applied to avoid dependency on specific runtime enums/macros not guaranteed present via provided headers; cudaFuncSetCacheConfig is sufficient and portable.'}]

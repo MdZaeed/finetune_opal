@@ -1,0 +1,161 @@
+```
+#include "sobol.h"
+#include "sobol_gpu.h"
+#include <cuda_runtime.h>
+#include <chrono>
+
+#define k_2powneg32 2.3283064E-10F
+
+// Mathematical notes (preconditions, postconditions, invariants) for semantic preservation:
+// Preconditions:
+// - n_vectors >= 0, n_dimensions >= 1
+// - gridDim.y == n_dimensions (host ensures)
+// - blockDim.x is a power-of-two and gridDim.x is a power-of-two (host ensures), so stride = gridDim.x * blockDim.x is a power-of-two
+// - n_directions (from sobol.h) >= 1 and typically 32 for 32-bit Sobol, and n_directions >= log2(stride)
+// - d_directions points to an array with at least n_dimensions * n_directions 32-bit direction numbers
+// - d_output points to an array with at least n_dimensions * n_vectors floats
+//
+// Postconditions:
+// - For each dimension y in [0, n_dimensions), and for each index i in [0, n_vectors), d_output[y*n_vectors + i]
+//   equals X_i * 2^-32, where X_i is the i-th 32-bit Sobol integer for dimension y defined by the standard
+//   Gray-code construction using the provided direction numbers d_directions[y*n_directions + k], k in [0, n_directions).
+//
+// Loop invariants and preservation proofs:
+//
+// 1) Shared-memory direction load:
+//    Invariant: After __syncthreads(), for all k in [0, n_directions), v[k] == d_directions[k] (dimension-adjusted).
+//    Preservation: Only threads with threadIdx.x < n_directions write v[threadIdx.x] from the corresponding
+//    d_directions entry; no thread writes other indices; __syncthreads() ensures visibility before any read.
+//
+// 2) Initial Gray-code accumulation (k-loop):
+//    Invariant: At the start of iteration k (0-based), X == XOR_{j in [0, k)} (bit_j(g0) ? v[j] : 0), and g == g0 >> k,
+//    where g0 = i0 ^ (i0 >> 1) is the Gray code of i0.
+//    Preservation: At iteration k, mask = -(g & 1) applies v[k] iff the current LSB of g is 1. Then g >>= 1.
+//    Thus after the body, accumulated X matches inclusion of bit k, and g is shifted for the next bit.
+//    The loop executes exactly log2(stride) iterations, which suffices because i0 modulo stride can be
+//    represented with log2(stride) Gray-code bits; higher bits are constant across the stride class.
+//
+// 3) Grid-stride recurrence loop:
+//    Invariant: Before each iteration for index i, X equals the Sobol integer X_i for the current dimension.
+//    Preservation: The known Sobol recurrence for stepping by a power-of-two stride S is
+//    X_{i} = X_{i-S} XOR v[log2(S)-1] XOR v[c(i,S)],
+//    where c(i,S) = index of least significant zero bit in (i - S) among the lower log2(S) bits,
+//    which is computed as __ffs(~((i - S) | (S - 1))) - 1. This matches the update used.
+//    Therefore, after X ^= v_log2stridem1 ^ v[idx], we obtain the correct X_i, which is stored.
+//    Since i increments by stride, the invariant holds for the next iteration.
+//
+// Early return correctness:
+// - If i0 >= n_vectors, this thread has no in-bounds work. All shared-memory setup already completed, and
+//   no per-thread state is required by other threads; returning here eliminates divergent conditionals later
+//   without affecting other threads.
+
+static __device__ __forceinline__ void store_cg(float* addr, float val) {
+#if __CUDA_ARCH__ >= 800
+    asm volatile("st.global.cg.f32 [%0], %1;" :: "l"(addr), "f"(val) : "memory");
+#else
+    *addr = val;
+#endif
+}
+
+__global__ __launch_bounds__(256)
+void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+                     unsigned *__restrict__ d_directions,
+                     float *__restrict__ d_output)
+{
+    // Shared buffer for per-dimension direction numbers.
+    __shared__ unsigned int v[n_directions];
+
+    // Adjust per-dimension pointers.
+    d_directions += n_directions * blockIdx.y;
+    d_output     += n_vectors    * blockIdx.y;
+
+    // Load direction numbers into shared memory.
+    if (threadIdx.x < n_directions) {
+        // Using direct load; small, contiguous, coalesced across initial threads.
+        v[threadIdx.x] = d_directions[threadIdx.x];
+    }
+    __syncthreads();
+
+    // Compute per-thread starting index and stride (power-of-two by host construction).
+    const int i0     = threadIdx.x + blockIdx.x * blockDim.x;
+    const int stride = gridDim.x * blockDim.x;
+
+    if (i0 >= (int)n_vectors) {
+        return;
+    }
+
+    // Precompute log2(stride) and masks used repeatedly.
+    const unsigned int log2_stride = __ffs((unsigned)stride) - 1;      // since stride is power-of-two
+    const unsigned int v_mask      = (unsigned)stride - 1u;
+
+    // Initial Gray-code build for X at index i0.
+    unsigned int g = (unsigned)i0 ^ ((unsigned)i0 >> 1);
+    unsigned int X = 0u;
+
+    // Unroll to improve ILP while guarding by log2_stride bound.
+#pragma unroll 32
+    for (unsigned int k = 0; k < 32; ++k) {
+        if (k >= log2_stride) break;
+        unsigned int mask = - (g & 1u);
+        X ^= mask & v[k];
+        g >>= 1u;
+    }
+
+    // First output write (coalesced). Use L2-cached store to reduce L1TEX write pressure on Hopper.
+    store_cg(d_output + i0, (float)X * k_2powneg32);
+
+    // Prepare constants for the grid-stride recurrence.
+    const unsigned int v_log2stridem1 = v[log2_stride - 1u];
+
+    // Grid-stride loop: compute subsequent Sobol numbers separated by 'stride'.
+    for (unsigned int i = (unsigned int)i0 + (unsigned int)stride; i < (unsigned int)n_vectors; i += (unsigned int)stride) {
+        // Index of least significant zero bit in (i - stride) within lower log2_stride bits.
+        unsigned int idx = __ffs(~((i - (unsigned)stride) | v_mask)) - 1u;
+        X ^= (v_log2stridem1 ^ v[idx]);
+        store_cg(d_output + i, (float)X * k_2powneg32);
+    }
+}
+
+double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+                unsigned int *d_directions, float *d_output)
+{
+    // Choose a larger power-of-two block size to raise occupancy on H100 while preserving
+    // stride power-of-two property.
+    const int threadsperblock = 256;
+
+    dim3 dimGrid;
+    dim3 dimBlock;
+
+    dimGrid.y = n_dimensions;
+
+    if (n_dimensions < (4 * 24)) {
+        dimGrid.x = 4 * 24;
+    } else {
+        dimGrid.x = 1;
+    }
+
+    if (dimGrid.x > (unsigned int)(n_vectors / threadsperblock)) {
+        dimGrid.x = (n_vectors + threadsperblock - 1) / threadsperblock;
+    }
+
+    // Round dimGrid.x up to next power-of-two to preserve stride power-of-two precondition.
+    unsigned int targetDimGridX = dimGrid.x;
+    for (dimGrid.x = 1; dimGrid.x < targetDimGridX; dimGrid.x *= 2) {}
+
+    dimBlock.x = threadsperblock;
+
+    cudaDeviceSynchronize();
+    auto start = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < repeat; i++)
+        sobolGPU_kernel <<<dimGrid, dimBlock>>> (
+          n_vectors, n_dimensions, d_directions, d_output);
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    return time;
+}
+```
+optimizations list = [{'lines': ['store_cg helper function', 'sobolGPU_kernel signature with __launch_bounds__', 'shared load and barrier region', 'precompute log2_stride and v_mask', 'early return when i0 >= n_vectors', 'unrolled Gray-code accumulation loop', 'L2-cached global stores via store_cg for both first and grid-stride writes', 'host: threadsperblock set to 256', 'preserved power-of-two grid.x rounding loop'], 'reason': 'Reduce stall_wait_ratio and stall_short_sb_ratio by removing repeated __ffs() in loops and early-exiting threads with no work (PC lines 228, 243, 254-256). Increase occupancy and hide memory latency by raising block size to 256 on H100. Reduce L1TEX crossbar write pressure by using st.global.cg (counters l1tex__m_l1tex2xbar_write_bytes.sum and .pct_of_peak_sustained_elapsed are high). Unrolling the small Gray-code loop improves ILP and reduces branch resolving stalls (PC lines 249-251). Precomputations remove redundant special-function unit work (PC line 283).'}]
+suggested_but_not_applied list = [{'lines': ['Use cp.async / cuda::memcpy_async to stage d_directions to shared memory'], 'reason': 'Would further hide global->shared latency on Hopper, but the transfer is only ~128 bytes per block and not the dominant cost; added complexity is unlikely to move the needle given the bottleneck is global stores (PC summary and DRAM/L1TEX write counters).'}, {'lines': ['Vectorized float4 stores for d_output'], 'reason': 'Could reduce the number of store instructions and crossbar pressure, but requires stricter alignment and careful tail handling; not applied to avoid altering memory access semantics.'}, {'lines': ['Move direction numbers to __constant__ memory'], 'reason': 'Could improve cache behavior, but d_directions is per-dimension and passed at runtime; binding to constant memory would require API changes and additional host-side setup not allowed by the entrypoint guardrails.'}]

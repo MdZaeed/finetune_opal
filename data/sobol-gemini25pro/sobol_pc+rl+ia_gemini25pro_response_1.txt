@@ -1,0 +1,195 @@
+```cpp
+#include "sobol.h"
+#include "sobol_gpu.h"
+
+#define k_2powneg32 2.3283064E-10F
+#define SOBOL_BITS_PER_DIMENSION 32 // Assuming 32-bit Sobol numbers, fixing the bug with 'n_directions'
+
+__global__
+void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+                     unsigned *__restrict__ d_directions,
+                     float *__restrict__ d_output)
+{
+
+
+    __shared__ unsigned int v[SOBOL_BITS_PER_DIMENSION];
+
+
+
+    d_directions += SOBOL_BITS_PER_DIMENSION * blockIdx.y;
+    d_output += n_vectors * blockIdx.y;
+
+
+
+
+    if (threadIdx.x < SOBOL_BITS_PER_DIMENSION)
+    {
+        v[threadIdx.x] = d_directions[threadIdx.x];
+    }
+
+
+    __syncthreads();
+
+
+
+
+    int i0     = threadIdx.x + blockIdx.x * blockDim.x;
+    int stride = gridDim.x * blockDim.x;
+
+
+
+
+    unsigned int g = i0 ^ (i0 >> 1);
+
+
+
+
+
+    unsigned int X = 0;
+    unsigned int mask;
+
+    #pragma unroll
+    for (unsigned int k = 0 ; k < __ffs(stride) - 1 ; k++)
+    {
+
+
+
+
+        mask = - (g & 1);
+        X ^= mask & v[k];
+        g = g >> 1;
+    }
+
+    if (i0 < n_vectors)
+    {
+        d_output[i0] = (float)X * k_2powneg32;
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    unsigned int v_log2stridem1 = v[__ffs(stride) - 2];
+    unsigned int v_stridemask = stride - 1;
+
+    for (unsigned int i = i0 + stride ; i < n_vectors ; i += stride)
+    {
+
+
+
+
+        X ^= v_log2stridem1 ^ v[__ffs(~((i - stride) | v_stridemask)) - 1];
+        d_output[i] = (float)X * k_2powneg32;
+    }
+}
+
+double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+                unsigned int *d_directions, float *d_output)
+{
+    const int threadsperblock = 64;
+
+
+    dim3 dimGrid;
+    dim3 dimBlock;
+
+
+
+
+
+
+
+    dimGrid.y = n_dimensions;
+
+
+
+
+    if (n_dimensions < (4 * 24))
+    {
+        dimGrid.x = 4 * 24;
+    }
+    else
+    {
+        dimGrid.x = 1;
+    }
+
+
+    if (dimGrid.x > (unsigned int)(n_vectors / threadsperblock))
+    {
+        dimGrid.x = (n_vectors + threadsperblock - 1) / threadsperblock;
+    }
+
+
+
+    unsigned int targetDimGridX = dimGrid.x;
+    for (dimGrid.x = 1 ; dimGrid.x < targetDimGridX ; dimGrid.x *= 2);
+
+
+    dimBlock.x = threadsperblock;
+
+    cudaDeviceSynchronize();
+    auto start = std::chrono::steady_clock::now();
+
+
+    for (int i = 0; i < repeat; i++)
+      sobolGPU_kernel <<<dimGrid, dimBlock>>> (
+        n_vectors, n_dimensions, d_directions, d_output);
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    return time;
+}
+```
+```json
+[
+  {
+    "lines": [38, 47, 51, 59],
+    "reason": "Fixed a critical bug where 'n_directions' was used as an uninitialized variable for shared memory array size and pointer arithmetic. Introduced a macro `SOBOL_BITS_PER_DIMENSION` (assuming 32-bit Sobol numbers) to explicitly define the length of the direction vector, ensuring correct memory allocation and indexing. This addresses the undefined behavior and makes the code semantically correct. Precondition: `SOBOL_BITS_PER_DIMENSION` is a positive integer representing the number of bits in a Sobol direction vector. Postcondition: The `v` array is correctly sized and populated with the direction numbers for the current Sobol dimension. Loop Invariant (for the shared memory load): At the start of the `if (threadIdx.x < SOBOL_BITS_PER_DIMENSION)` block, `v` contains undefined values. After the block, `v[threadIdx.x]` contains `d_directions[threadIdx.x]` for `threadIdx.x < SOBOL_BITS_PER_DIMENSION`. Proof: The conditional assignment ensures that only valid indices are accessed and written to, and `__syncthreads()` guarantees visibility across the block before `v` is read."
+  },
+  {
+    "lines": [83],
+    "reason": "Applied `#pragma unroll` to the first `for` loop. This loop iterates `log2(stride)` times, which is a small, fixed number of iterations (e.g., 6 for `stride=64`). Unrolling this loop reduces loop overhead, such as branch instructions and loop counter updates, potentially improving instruction issue rate and reducing `stall_wait_ratio` and `stall_branch_resolving_ratio` as indicated in the PC Summary. Precondition: `stride` is a power of 2. Postcondition: `X` correctly accumulates the XOR sum based on the Gray code and direction numbers. Loop Invariant: At the beginning of each iteration `k`, `X` holds the XOR sum of `mask & v[j]` for `j < k` where `mask` is derived from the `j`-th bit of the initial Gray code `g_initial`, and `g` holds `g_initial >> k`. Proof: Unrolling the loop does not change the sequence of operations or their mathematical logic; it merely replicates the loop body, preserving the invariant at each conceptual iteration step."
+  }
+]
+```
+```json
+[
+  {
+    "lines": [96, 135],
+    "reason": "The Roofline Summary suggested converting non-fused FP32 instructions to fused (FMA) for potential performance gains. However, the floating-point operations in this kernel are `(float)X * k_2powneg32;`, which are simple multiplications. Fused Multiply-Add (FMA) requires an operation of the form `A * B + C`. Since there is no addition component in the existing FP32 operations, introducing FMA would require a change in the mathematical algorithm, which is outside the scope of performance optimization without altering semantic equivalence. Additionally, the counter summary explicitly warns against using `__int_as_float` for integer to float conversion, which is a common technique to enable FMA for such cases but is deemed unsafe."
+  },
+  {
+    "lines": [142],
+    "reason": "The Roofline Summary indicated low achieved occupancy (25.6%) and suggested tuning the launch configuration, specifically block size. While increasing `threadsperblock` (currently 64) to 128 or 256 might improve occupancy, it could also lead to increased register pressure or changes in `stride` behavior, which might require further analysis and potentially more significant code changes. Without specific data on register usage or a clear indication that register pressure is the limiting factor, and given the constraint to avoid major structural changes, this optimization was not applied to maintain stability and minimize potential side effects."
+  },
+  {
+    "lines": [219, 250, 283, 294],
+    "reason": "The PC Summary highlighted `stall_short_sb_ratio` as a significant stall reason, often associated with shared memory operations. While the `v` array is stored in shared memory and accessed multiple times, the access patterns (broadcast reads for `v[k]` and `v_log2stridem1`, and a calculated index for `v[...]`) are inherent to the Sobol algorithm. Given that `SOBOL_BITS_PER_DIMENSION` is small (32 elements, 128 bytes), shared memory bank conflicts are less likely to be the primary cause than general shared memory access latency. Without more detailed analysis of shared memory access patterns or a clear path to reduce these accesses without altering the algorithm, further optimization of shared memory access beyond the initial load and `__syncthreads()` was not applied."
+  }
+]
+```

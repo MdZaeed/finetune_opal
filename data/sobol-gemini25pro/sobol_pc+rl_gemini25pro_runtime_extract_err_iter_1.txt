@@ -1,0 +1,3 @@
+/storage/users/tz2201/opal_new/opal/src/runtime_extractors/sobol-codex-gemini25pro_runtime_extractor.sh: line 66: use: command not found
+/storage/users/tz2201/opal_new/opal/src/runtime_extractors/sobol-codex-gemini25pro_runtime_extractor.sh: line 67: syntax error near unexpected token `('
+/storage/users/tz2201/opal_new/opal/src/runtime_extractors/sobol-codex-gemini25pro_runtime_extractor.sh: line 67: `/[Pp]rogram finished in ([0-9]*\.?[0-9]+) ?(ms|s|us|milliseconds|seconds|microseconds)/ {'

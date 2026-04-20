@@ -1,0 +1,13 @@
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(10050): error: identifier "nijk" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(10073): error: identifier "nijk" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(10096): error: identifier "nijk" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(10119): error: identifier "nijk" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(10210): error: identifier "nijk" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(10216): error: identifier "nijk" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(10222): error: identifier "nijk" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(10228): error: identifier "nijk" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(10456): error: identifier "nijk" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+rl/src/device-routines.C(10469): error: identifier "nijk" is undefined
+make[2]: *** [CMakeFiles/sw4lite.dir/build.make:245: CMakeFiles/sw4lite.dir/src/device-routines.C.o] Error 2
+make[1]: *** [CMakeFiles/Makefile2:87: CMakeFiles/sw4lite.dir/all] Error 2
+make: *** [Makefile:91: all] Error 2

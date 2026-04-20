@@ -1,0 +1,2 @@
+collect2: error: ld returned 1 exit status
+make: *** [Makefile:48: main] Error 1

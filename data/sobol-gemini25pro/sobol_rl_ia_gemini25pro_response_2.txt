@@ -1,0 +1,140 @@
+```cpp
+#include "sobol.h"
+#include "sobol_gpu.h"
+
+#define k_2powneg32 2.3283064E-10F
+#define n_directions 32 // This macro appears to be missing from the original source but is used
+                        // as a compile-time value. 32 is a standard value for Sobol direction vectors.
+
+__global__
+void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+                     unsigned *__restrict__ d_directions,
+                     float *__restrict__ d_output)
+{
+    // Optimization: Replace shared memory with registers to eliminate bank conflicts and MIO stalls.
+    unsigned int v[n_directions];
+
+    d_directions += n_directions * blockIdx.y;
+    d_output += n_vectors * blockIdx.y;
+
+    // Each thread loads the direction vectors for the current dimension into its private registers.
+    // This involves redundant loads across threads, but these reads will be served by the L1/L2
+    // cache and avoid the shared memory bank conflicts that were the primary performance bottleneck.
+    #pragma unroll
+    for (unsigned int i = 0; i < n_directions; i++)
+    {
+        v[i] = d_directions[i];
+    }
+
+    int i0     = threadIdx.x + blockIdx.x * blockDim.x;
+    int stride = gridDim.x * blockDim.x;
+
+    unsigned int g = i0 ^ (i0 >> 1);
+
+    unsigned int X = 0;
+    unsigned int mask;
+
+    // This loop now accesses registers, which is much faster.
+    for (unsigned int k = 0 ; k < __ffs(stride) - 1 ; k++)
+    {
+        mask = - (g & 1);
+        X ^= mask & v[k];
+        g = g >> 1;
+    }
+
+    if (i0 < n_vectors)
+    {
+        d_output[i0] = (float)X * k_2powneg32;
+    }
+
+    unsigned int v_log2stridem1 = v[__ffs(stride) - 2];
+    unsigned int v_stridemask = stride - 1;
+
+    // This loop, previously the source of shared memory bank conflicts, now uses registers.
+    for (unsigned int i = i0 + stride ; i < n_vectors ; i += stride)
+    {
+        X ^= v_log2stridem1 ^ v[__ffs(~((i - stride) | v_stridemask)) - 1];
+        d_output[i] = (float)X * k_2powneg32;
+    }
+}
+
+double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+                unsigned int *d_directions, float *d_output)
+{
+    const int threadsperblock = 64;
+
+
+    dim3 dimGrid;
+    dim3 dimBlock;
+
+
+
+
+    dimGrid.y = n_dimensions;
+
+
+
+
+    if (n_dimensions < (4 * 24))
+    {
+        dimGrid.x = 4 * 24;
+    }
+    else
+    {
+        dimGrid.x = 1;
+    }
+
+
+    if (dimGrid.x > (unsigned int)(n_vectors / threadsperblock))
+    {
+        dimGrid.x = (n_vectors + threadsperblock - 1) / threadsperblock;
+    }
+
+
+
+    unsigned int targetDimGridX = dimGrid.x;
+    for (dimGrid.x = 1 ; dimGrid.x < targetDimGridX ; dimGrid.x *= 2);
+
+
+    dimBlock.x = threadsperblock;
+
+    cudaDeviceSynchronize();
+    auto start = std::chrono::steady_clock::now();
+
+
+    for (int i = 0; i < repeat; i++)
+      sobolGPU_kernel <<<dimGrid, dimBlock>>> (
+        n_vectors, n_dimensions, d_directions, d_output);
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    return time;
+}
+```
+```json
+{
+"optimizations": [
+{
+"lines": [
+47,
+57,
+58,
+59,
+60,
+63
+],
+"reason": "The performance analysis (point 3) indicates that the kernel spends 44.8% of its time stalled on MIO (memory input/output) operations, which are attributed to shared memory accesses. These stalls are likely caused by bank conflicts from the irregular access pattern `v[__ffs(~((i - stride) | v_stridemask)) - 1]` in line 134. To eliminate these stalls, the `__shared__` memory array `v` is replaced with a private register-based array for each thread. Each thread now loads the direction vectors into its own registers. This avoids shared memory usage for the `v` array, directly addressing the primary performance bottleneck. This change also helps improve the low instruction issue rate (point 1) and low achieved occupancy (point 2) which are consequences of frequent warp stalls."
+}
+],
+"suggested_but_not_applied": [
+{
+"lines": [
+96,
+135
+],
+"reason": "The performance analysis (point 4) suggests using fused multiply-add (FMA) instructions to improve FP32 performance. However, the floating-point operations in the kernel are of the form `(float)X * k_2powneg32`, which is a single multiplication. There is no subsequent addition operation that can be fused with the multiplication. Therefore, FMA instructions are not applicable without fundamentally changing the algorithm."
+}
+]
+}
+```

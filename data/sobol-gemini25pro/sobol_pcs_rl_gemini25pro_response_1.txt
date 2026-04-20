@@ -1,0 +1,188 @@
+```cpp
+#include "sobol.h"
+#include "sobol_gpu.h"
+
+#define k_2powneg32 2.3283064E-10F
+
+__global__
+void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+                     unsigned *__restrict__ d_directions,
+                     float *__restrict__ d_output)
+{
+
+
+    extern __shared__ unsigned int v[];
+
+
+
+    d_directions += n_directions * blockIdx.y;
+    d_output += n_vectors * blockIdx.y;
+
+
+
+
+    if (threadIdx.x < n_dimensions)
+    {
+        v[threadIdx.x] = d_directions[threadIdx.x];
+    }
+
+
+    __syncthreads();
+
+
+
+
+    int i0     = threadIdx.x + blockIdx.x * blockDim.x;
+    int stride = gridDim.x * blockDim.x;
+
+
+
+
+    unsigned int g = i0 ^ (i0 >> 1);
+
+
+
+
+
+    unsigned int X = 0;
+    unsigned int mask;
+
+    unsigned int log2_stride = __ffs(stride) - 1;
+
+    for (unsigned int k = 0 ; k < log2_stride ; k++)
+    {
+
+
+
+
+        mask = - (g & 1);
+        X ^= mask & v[k];
+        g = g >> 1;
+    }
+
+    if (i0 < n_vectors)
+    {
+        d_output[i0] = (float)X * k_2powneg32;
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    unsigned int v_log2stridem1 = v[log2_stride - 1];
+    unsigned int v_stridemask = stride - 1;
+
+    for (unsigned int i = i0 + stride ; i < n_vectors ; i += stride)
+    {
+
+
+
+
+
+
+
+        X ^= v_log2stridem1 ^ v[__ffs(~((i - stride) | v_stridemask)) - 1];
+        d_output[i] = (float)X * k_2powneg32;
+    }
+}
+
+double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+                unsigned int *d_directions, float *d_output)
+{
+    const int threadsperblock = 128;
+
+
+    dim3 dimGrid;
+    dim3 dimBlock;
+
+
+
+
+
+    dimGrid.y = n_dimensions;
+
+
+
+
+    // Set a target for blocks in the X dimension to ensure the GPU is occupied.
+    // The original code used 96, which might be tuned for a specific device.
+    // The logic that reduced this to 1 for high dimensions was detrimental and is removed.
+    dimGrid.x = 4 * 24;
+
+    // We don't need more blocks than there are vector elements to process.
+    unsigned int max_blocks_x = (n_vectors + threadsperblock - 1) / threadsperblock;
+    if (dimGrid.x > max_blocks_x)
+    {
+        dimGrid.x = max_blocks_x;
+    }
+
+    // The kernel algorithm relies on the stride being a power of two.
+    // Round gridDim.x up to the next power of two to ensure this.
+    unsigned int targetDimGridX = dimGrid.x;
+    if (targetDimGridX > 0) {
+        for (dimGrid.x = 1 ; dimGrid.x < targetDimGridX ; dimGrid.x *= 2);
+    } else {
+        dimGrid.x = 0;
+    }
+
+
+    dimBlock.x = threadsperblock;
+
+    cudaDeviceSynchronize();
+    auto start = std::chrono::steady_clock::now();
+
+
+    for (int i = 0; i < repeat; i++)
+      sobolGPU_kernel <<<dimGrid, dimBlock, n_dimensions * sizeof(unsigned int)>>> (
+        n_vectors, n_dimensions, d_directions, d_output);
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    return time;
+}
+```
+```json
+{
+  "optimizations": [
+    {
+      "lines": [47],
+      "reason": "The original code used a variable-length array for shared memory `__shared__ unsigned int v[n_directions];`, which is not valid CUDA C++. This has been corrected to use dynamic shared memory by declaring it as `extern __shared__ unsigned int v[];` and passing the size as a launch parameter. This is a correctness fix."
+    },
+    {
+      "lines": [188, 189],
+      "reason": "Following the change to dynamic shared memory, the kernel launch configuration is updated to include the size of the shared memory array, `n_dimensions * sizeof(unsigned int)`, which is required for the kernel to allocate it correctly."
+    },
+    {
+      "lines": [142],
+      "reason": "The number of threads per block was increased from 64 to 128. The performance analysis indicates low achieved occupancy (Roofline #3) and significant stalls due to memory dependencies (Roofline #1, Stall Analysis). Increasing the threads per block increases the number of warps per block, which improves the scheduler's ability to hide memory latency by switching to other ready warps, thus increasing hardware utilization and performance."
+    },
+    {
+      "lines": [160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179],
+      "reason": "The original grid dimension calculation logic was flawed, severely reducing `dimGrid.x` to 1 for high `n_dimensions`. This starves the GPU of parallel work and leads to very low achieved occupancy (Roofline #3). The logic has been replaced to ensure a sufficiently large number of blocks are always launched in the x-dimension, capped only by the total amount of work, and then rounded up to a power of two as required by the kernel's algorithm. This ensures the GPU is well-occupied."
+    },
+    {
+      "lines": [82, 83, 123],
+      "reason": "The value of `__ffs(stride) - 1` was computed multiple times. It is now computed once and stored in `log2_stride`. This value is then used for the loop bound and to calculate the index for `v_log2stridem1`. This is a minor micro-optimization to reduce redundant computations."
+    }
+  ],
+  "suggested_but_not_applied": []
+}
+```

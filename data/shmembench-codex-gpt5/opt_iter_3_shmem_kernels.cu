@@ -1,0 +1,154 @@
+#include <cstdio>
+#include <cstdlib>
+#include <chrono>
+#include <cuda_runtime.h>
+
+using namespace std::chrono;
+
+#define TOTAL_ITERATIONS (1024)
+#define BLOCK_SIZE 256
+
+// Simple CUDA error check helper
+static inline void checkCuda(cudaError_t e, const char* msg) {
+  if (e != cudaSuccess) {
+    std::fprintf(stderr, "CUDA error: %s: %s\n", msg, cudaGetErrorString(e));
+    std::exit(EXIT_FAILURE);
+  }
+}
+
+__device__ __forceinline__ void shmem_swap(float4 *v1, float4 *v2){
+  // Use two register temporaries to minimize shared memory pipeline pressure
+  float4 a = *v1;
+  float4 b = *v2;
+  *v1 = b;
+  *v2 = a;
+}
+
+__device__ __forceinline__ float4 init_val(int i){
+  // Avoid implicit double intermediates by explicit float casts
+  return make_float4((float)i, (float)(i+11), (float)(i+19), (float)(i+23));
+}
+
+__device__ __forceinline__ float4 reduce_vector(float4 v1, float4 v2, float4 v3, float4 v4, float4 v5, float4 v6){
+  return make_float4(v1.x + v2.x + v3.x + v4.x + v5.x + v6.x,
+                     v1.y + v2.y + v3.y + v4.y + v5.y + v6.y,
+                     v1.z + v2.z + v3.z + v4.z + v5.z + v6.z,
+                     v1.w + v2.w + v3.w + v4.w + v5.w + v6.w);
+}
+
+__device__ __forceinline__ void set_vector(float4 *target, int offset, float4 v){
+  // Single 128-bit shared store
+  target[offset] = v;
+}
+
+__global__ void benchmark_shmem(float4 *g_data){
+  __shared__ __align__(16) float4 shm_buffer[BLOCK_SIZE*6];
+
+  const int tid = threadIdx.x;
+  const int s   = blockDim.x;
+  const int globaltid = blockIdx.x*s + tid;
+
+  // Initialize per-thread 6-tuple in shared memory
+  set_vector(shm_buffer, tid+0*s, init_val(tid));
+  set_vector(shm_buffer, tid+1*s, init_val(tid+1));
+  set_vector(shm_buffer, tid+2*s, init_val(tid+3));
+  set_vector(shm_buffer, tid+3*s, init_val(tid+7));
+  set_vector(shm_buffer, tid+4*s, init_val(tid+13));
+  set_vector(shm_buffer, tid+5*s, init_val(tid+17));
+
+  // No __syncthreads(): each thread only touches its own addresses tid + k*s
+
+  #pragma unroll 32
+  for (int j = 0; j < TOTAL_ITERATIONS; j++) {
+    // Phase A: three independent local swaps
+    shmem_swap(shm_buffer + tid + 0*s, shm_buffer + tid + 1*s);
+    shmem_swap(shm_buffer + tid + 2*s, shm_buffer + tid + 3*s);
+    shmem_swap(shm_buffer + tid + 4*s, shm_buffer + tid + 5*s);
+
+    // Phase B: two dependent local swaps
+    shmem_swap(shm_buffer + tid + 1*s, shm_buffer + tid + 2*s);
+    shmem_swap(shm_buffer + tid + 3*s, shm_buffer + tid + 4*s);
+  }
+
+  g_data[globaltid] = reduce_vector(shm_buffer[tid+0*s],
+                                    shm_buffer[tid+1*s],
+                                    shm_buffer[tid+2*s],
+                                    shm_buffer[tid+3*s],
+                                    shm_buffer[tid+4*s],
+                                    shm_buffer[tid+5*s]);
+}
+
+void shmembenchGPU(double *c, const long size, const int repeat) {
+  // size is in doubles; each thread writes one float4 (16B) into cd
+  const int TOTAL_BLOCKS = size / (BLOCK_SIZE);
+
+  double *cd = nullptr;
+  checkCuda(cudaMalloc((void**)&cd, size*sizeof(double)), "cudaMalloc(cd)");
+
+  dim3 dimBlock(BLOCK_SIZE, 1, 1);
+  dim3 dimGrid_f4(TOTAL_BLOCKS/4, 1, 1); // 4 doubles == 1 float4
+
+  // Warm-up to stabilize clocks and JIT
+  if (dimGrid_f4.x > 0) {
+    benchmark_shmem<<< dimGrid_f4, dimBlock >>>((float4*)cd);
+    checkCuda(cudaGetLastError(), "kernel launch (warm-up)");
+    checkCuda(cudaDeviceSynchronize(), "device sync (warm-up)");
+  }
+
+  auto start = high_resolution_clock::now();
+
+  for (int i = 0; i < repeat; i++) {
+    benchmark_shmem<<< dimGrid_f4, dimBlock >>>((float4*)cd);
+  }
+
+  checkCuda(cudaGetLastError(), "kernel launch");
+  checkCuda(cudaDeviceSynchronize(), "device sync");
+
+  auto end = high_resolution_clock::now();
+  auto time_shmem_128b = duration_cast<nanoseconds>(end - start).count() / (double)repeat;
+  std::printf("Average kernel execution time : %f (ms)\n", time_shmem_128b * 1e-6);
+
+  checkCuda(cudaMemcpy(c, cd, size*sizeof(double), cudaMemcpyDeviceToHost), "cudaMemcpy D2H");
+  checkCuda(cudaFree(cd), "cudaFree(cd)");
+
+  double sum = 0;
+  for (long i = 0; i < size; i++) sum += c[i];
+  if (sum != 21256458760384741137729978368.00)
+    std::printf("checksum failed\n");
+
+  std::printf("Memory throughput\n");
+  const long long operations_bytes  = (6LL + 4*5*TOTAL_ITERATIONS + 6) * (long long)size * (long long)sizeof(float);
+  const long long operations_128bit = (6LL + 4*5*TOTAL_ITERATIONS + 6) * (long long)size / 4LL;
+
+  std::printf("\tusing 128bit operations : %8.2f GB/sec (%6.2f billion accesses/sec)\n",
+    (double)operations_bytes / time_shmem_128b,
+    (double)operations_128bit / time_shmem_128b);
+}
+
+int main(int argc, char** argv) {
+  // Default parameters; can be overridden via CLI: ./app [size] [repeat]
+  // Choose size as a multiple of BLOCK_SIZE*4 to preserve the launch mapping.
+  long size = (long)BLOCK_SIZE * 4 * 4096; // in doubles
+  int repeat = 50;
+
+  if (argc > 1) size = std::atoll(argv[1]);
+  if (argc > 2) repeat = std::atoi(argv[2]);
+
+  // Guard: ensure size produces a valid grid configuration
+  if ((size % (BLOCK_SIZE*4)) != 0) {
+    std::fprintf(stderr, "Error: size (%ld) must be a multiple of BLOCK_SIZE*4 (%d)\n",
+                 size, BLOCK_SIZE*4);
+    return EXIT_FAILURE;
+  }
+
+  double* host = (double*)std::malloc(size * sizeof(double));
+  if (!host) {
+    std::fprintf(stderr, "Host malloc failed\n");
+    return EXIT_FAILURE;
+  }
+
+  shmembenchGPU(host, size, repeat);
+
+  std::free(host);
+  return 0;
+}

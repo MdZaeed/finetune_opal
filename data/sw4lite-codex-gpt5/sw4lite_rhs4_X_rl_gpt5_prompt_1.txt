@@ -1,0 +1,520 @@
+# Begin Source Code
+```cpp```
+1: __global__ void rhs4_X (int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+2: 			  int ni, int nj, int nk,
+3: 			  float_sw4* __restrict__ a_up,
+4: 			  const float_sw4* __restrict__ a_u,
+5: 			  const float_sw4* __restrict__ a_um,
+6: 			  const float_sw4* __restrict__ a_mu,
+7: 			  const float_sw4* __restrict__ a_lambda,
+8: 			  const float_sw4* __restrict__ a_rho,
+9: 			  const float_sw4* __restrict__ a_fo,
+10: 			  const float_sw4* __restrict__ a_strx,
+11: 			  const float_sw4* __restrict__ a_stry,
+12: 			  const float_sw4* __restrict__ a_strz,
+13: 			  const float_sw4 h,
+14: 			  const float_sw4 dt) {
+15:   int index, i;
+16:
+17:   const float_sw4 i6   = 1.0/6;
+18:   const float_sw4 i144 = 1.0/144;
+19:   const float_sw4 tf   = 0.75;
+20:
+21:   float_sw4 strx_im2, strx_im1, strx_i, strx_ip1, strx_ip2;
+22:   float_sw4 stry_jm2, stry_jm1, stry_j, stry_jp1, stry_jp2;
+23:   float_sw4 strz_km2, strz_km1, strz_k, strz_kp1, strz_kp2;
+24:
+25:   float_sw4 la_km2, la_km1, la_ijk, la_kp1, la_kp2;
+26:   float_sw4 la_im2, la_im1, la_ip1, la_ip2;
+27:   float_sw4 la_jm2, la_jm1, la_jp1, la_jp2;
+28:
+29:   float_sw4 mu_km2, mu_km1, mu_ijk, mu_kp1, mu_kp2;
+30:   float_sw4 mu_im2, mu_im1, mu_ip1, mu_ip2;
+31:   float_sw4 mu_jm2, mu_jm1, mu_jp1, mu_jp2;
+32:
+33:   float_sw4 r1, r2, r3;
+34:   int active=0, loadj1=0, loadj2=0, loadk1=0, loadk2=0, loadk3=0, loadk4=0;
+35:
+36:   __shared__ float_sw4 shm[3][12+4][16+4][2+4];
+37:
+38:   float_sw4 cof = 1.0 / (h * h);
+39:
+40:   const int j = jfirst + threadIdx.y + blockIdx.y * 16;
+41:   const int k = kfirst + threadIdx.z + blockIdx.z * 12;
+42:
+43:   const int ti = threadIdx.x + 2;
+44:   const int tj = threadIdx.y + 2;
+45:   const int tk = threadIdx.z + 2;
+46:
+47:   int tid = (threadIdx.z * 16 + threadIdx.y) * 2 + threadIdx.x;
+48:   int txload = (tid % 6);
+49:   int tyload = (tid / 6);
+50:   int tzload = tyload / 16;
+51:   tyload = tyload % 16;
+52:
+53:   const int nij = ni * nj;
+54:   const int nijk = nij * nk;
+55:
+56:   if (j <= jlast && k <= klast)
+57:     active = 1;
+58:
+59:   if (active) {
+60:
+61:     stry_jm2 = a_stry[j-2];
+62:     stry_jm1 = a_stry[j-1];
+63:     stry_j   = a_stry[j];
+64:     stry_jp1 = a_stry[j+1];
+65:     stry_jp2 = a_stry[j+2];
+66:
+67:     strz_km2 = a_strz[k-2];
+68:     strz_km1 = a_strz[k-1];
+69:     strz_k   = a_strz[k];
+70:     strz_kp1 = a_strz[k+1];
+71:     strz_kp2 = a_strz[k+2];
+72:   }
+73:
+74:   int jload, kload;
+75:   jload = blockIdx.y * 16 + tyload + jfirst - 2;
+76:   kload = blockIdx.z * 12 + tzload + kfirst - 2;
+77:
+78:   if (jload <= jlast+2) loadj1 = 1;
+79:   if (tyload < 4 && jload+16 <= jlast+2) loadj2 = 1;
+80:   if (kload <= klast+2) loadk1 = 1;
+81:   if (kload+4 <= klast+2) loadk2 = 1;
+82:   if (kload+8 <= klast+2) loadk3 = 1;
+83:   if (kload+12 <= klast+2) loadk4 = 1;
+84:
+85: #pragma unroll
+86:   for (int iside=0; iside < 2; iside++) {
+87:
+88:     if (iside == 0) {
+89:
+90:       index = (kload * nj + jload) * ni + ifirst - 2 + txload;
+91:       i = ifirst + threadIdx.x;
+92:     }
+93:     else {
+94:
+95:       index = (kload * nj + jload) * ni + ilast - 3 + txload;
+96:       i = ilast - 1 + threadIdx.x;
+97:     }
+98:
+99:     if (loadj1) {
+100:       int idx = index;
+101:       if (loadk1) {
+102: 	shm[0][tzload][tyload][txload] = a_lambda[idx];
+103: 	shm[1][tzload][tyload][txload] = a_mu[idx];
+104:       }
+105:       idx += 4 * nij;
+106:       if (loadk2) {
+107: 	shm[0][tzload+4][tyload][txload] = a_lambda[idx];
+108: 	shm[1][tzload+4][tyload][txload] = a_mu[idx];
+109:       }
+110:       idx += 4 * nij;
+111:       if (loadk3) {
+112: 	shm[0][tzload+8][tyload][txload] = a_lambda[idx];
+113: 	shm[1][tzload+8][tyload][txload] = a_mu[idx];
+114:       }
+115:       idx += 4 * nij;
+116:       if (loadk4) {
+117: 	shm[0][tzload+12][tyload][txload] = a_lambda[idx];
+118: 	shm[1][tzload+12][tyload][txload] = a_mu[idx];
+119:       }
+120:     }
+121:     if (loadj2) {
+122:       int idx = index + 16 * ni;
+123:       if (loadk1) {
+124: 	shm[0][tzload][tyload+16][txload] = a_lambda[idx];
+125: 	shm[1][tzload][tyload+16][txload] = a_mu[idx];
+126:       }
+127:       idx += 4 * nij;
+128:       if (loadk2) {
+129: 	shm[0][tzload+4][tyload+16][txload] = a_lambda[idx];
+130: 	shm[1][tzload+4][tyload+16][txload] = a_mu[idx];
+131:       }
+132:       idx += 4 * nij;
+133:       if (loadk3) {
+134: 	shm[0][tzload+8][tyload+16][txload] = a_lambda[idx];
+135: 	shm[1][tzload+8][tyload+16][txload] = a_mu[idx];
+136:       }
+137:       idx += 4 * nij;
+138:       if (loadk4) {
+139: 	shm[0][tzload+12][tyload+16][txload] = a_lambda[idx];
+140: 	shm[1][tzload+12][tyload+16][txload] = a_mu[idx];
+141:       }
+142:     }
+143:     __syncthreads();
+144:
+145:     la_km2 = shm[0][tk-2][tj][ti];
+146:     la_km1 = shm[0][tk-1][tj][ti];
+147:     la_ijk = shm[0][tk  ][tj][ti];
+148:     la_kp1 = shm[0][tk+1][tj][ti];
+149:     la_kp2 = shm[0][tk+2][tj][ti];
+150:
+151:     la_jm2 = shm[0][tk][tj-2][ti];
+152:     la_jm1 = shm[0][tk][tj-1][ti];
+153:     la_jp1 = shm[0][tk][tj+1][ti];
+154:     la_jp2 = shm[0][tk][tj+2][ti];
+155:
+156:     la_im2 = shm[0][tk][tj][ti-2];
+157:     la_im1 = shm[0][tk][tj][ti-1];
+158:     la_ip1 = shm[0][tk][tj][ti+1];
+159:     la_ip2 = shm[0][tk][tj][ti+2];
+160:
+161:     mu_km2 = shm[1][tk-2][tj][ti];
+162:     mu_km1 = shm[1][tk-1][tj][ti];
+163:     mu_ijk = shm[1][tk  ][tj][ti];
+164:     mu_kp1 = shm[1][tk+1][tj][ti];
+165:     mu_kp2 = shm[1][tk+2][tj][ti];
+166:
+167:     mu_jm2 = shm[1][tk][tj-2][ti];
+168:     mu_jm1 = shm[1][tk][tj-1][ti];
+169:     mu_jp1 = shm[1][tk][tj+1][ti];
+170:     mu_jp2 = shm[1][tk][tj+2][ti];
+171:
+172:     mu_im2 = shm[1][tk][tj][ti-2];
+173:     mu_im1 = shm[1][tk][tj][ti-1];
+174:     mu_ip1 = shm[1][tk][tj][ti+1];
+175:     mu_ip2 = shm[1][tk][tj][ti+2];
+176:     __syncthreads();
+177:
+178:     if (loadj1) {
+179:       int idx = index;
+180:       if (loadk1) {
+181: 	shm[0][tzload][tyload][txload] = u(0,idx);
+182: 	shm[1][tzload][tyload][txload] = u(1,idx);
+183: 	shm[2][tzload][tyload][txload] = u(2,idx);
+184:       }
+185:       idx += 4 * nij;
+186:       if (loadk2) {
+187: 	shm[0][tzload+4][tyload][txload] = u(0,idx);
+188: 	shm[1][tzload+4][tyload][txload] = u(1,idx);
+189: 	shm[2][tzload+4][tyload][txload] = u(2,idx);
+190:       }
+191:       idx += 4 * nij;
+192:       if (loadk3) {
+193: 	shm[0][tzload+8][tyload][txload] = u(0,idx);
+194: 	shm[1][tzload+8][tyload][txload] = u(1,idx);
+195: 	shm[2][tzload+8][tyload][txload] = u(2,idx);
+196:       }
+197:       idx += 4 * nij;
+198:       if (loadk4) {
+199: 	shm[0][tzload+12][tyload][txload] = u(0,idx);
+200: 	shm[1][tzload+12][tyload][txload] = u(1,idx);
+201: 	shm[2][tzload+12][tyload][txload] = u(2,idx);
+202:       }
+203:     }
+204:     if (loadj2) {
+205:       int idx = index + 16 * ni;
+206:       if (loadk1) {
+207: 	shm[0][tzload][tyload+16][txload] = u(0,idx);
+208: 	shm[1][tzload][tyload+16][txload] = u(1,idx);
+209: 	shm[2][tzload][tyload+16][txload] = u(2,idx);
+210:       }
+211:       idx += 4 * nij;
+212:       if (loadk2) {
+213: 	shm[0][tzload+4][tyload+16][txload] = u(0,idx);
+214: 	shm[1][tzload+4][tyload+16][txload] = u(1,idx);
+215: 	shm[2][tzload+4][tyload+16][txload] = u(2,idx);
+216:       }
+217:       idx += 4 * nij;
+218:       if (loadk3) {
+219: 	shm[0][tzload+8][tyload+16][txload] = u(0,idx);
+220: 	shm[1][tzload+8][tyload+16][txload] = u(1,idx);
+221: 	shm[2][tzload+8][tyload+16][txload] = u(2,idx);
+222:       }
+223:       idx += 4 * nij;
+224:       if (loadk4) {
+225: 	shm[0][tzload+12][tyload+16][txload] = u(0,idx);
+226: 	shm[1][tzload+12][tyload+16][txload] = u(1,idx);
+227: 	shm[2][tzload+12][tyload+16][txload] = u(2,idx);
+228:       }
+229:     }
+230:     __syncthreads();
+231:
+232:     if (active) {
+233:
+234:       strx_im2 = a_strx[i-2];
+235:       strx_im1 = a_strx[i-1];
+236:       strx_i   = a_strx[i];
+237:       strx_ip1 = a_strx[i+1];
+238:       strx_ip2 = a_strx[i+2];
+239:
+240:       {
+241: 	float_sw4 mux1, mux2, mux3, mux4;
+242: 	mux1 = mu_im1 * strx_im1 - tf * (mu_ijk * strx_i + mu_im2 * strx_im2);
+243: 	mux2 = mu_im2 * strx_im2 + mu_ip1 * strx_ip1 + 3 * (mu_ijk * strx_i   + mu_im1 * strx_im1);
+244: 	mux3 = mu_im1 * strx_im1 + mu_ip2 * strx_ip2 + 3 * (mu_ip1 * strx_ip1 + mu_ijk * strx_i  );
+245: 	mux4 = mu_ip1 * strx_ip1 - tf * (mu_ijk * strx_i + mu_ip2 * strx_ip2);
+246:
+247: 	r1 = strx_i * ((2 * mux1 + la_im1 * strx_im1 - tf * (la_ijk * strx_i   + la_im2 * strx_im2)) *
+248: 		       (shm[0][tk+0][tj+0][ti-2] - shm[0][tk+0][tj+0][ti+0])+
+249: 		       (2 * mux2 + la_im2 * strx_im2 + la_ip1 * strx_ip1 +
+250: 			3 * (la_ijk * strx_i   + la_im1 * strx_im1)) *
+251: 		       (shm[0][tk+0][tj+0][ti-1] - shm[0][tk+0][tj+0][ti+0]) +
+252: 		       (2 * mux3 + la_im1 * strx_im1 + la_ip2 * strx_ip2 +
+253: 			3 * (la_ip1 * strx_ip1 + la_ijk * strx_i  )) *
+254: 		       (shm[0][tk+0][tj+0][ti+1] - shm[0][tk+0][tj+0][ti+0]) +
+255: 		       (2 * mux4 + la_ip1 * strx_ip1 - tf * (la_ijk * strx_i   + la_ip2 * strx_ip2)) *
+256: 		       (shm[0][tk+0][tj+0][ti+2] - shm[0][tk+0][tj+0][ti+0]));
+257: 	r2 = strx_i * (mux1 * (shm[1][tk+0][tj+0][ti-2] - shm[1][tk+0][tj+0][ti+0]) +
+258: 		       mux2 * (shm[1][tk+0][tj+0][ti-1] - shm[1][tk+0][tj+0][ti+0]) +
+259: 		       mux3 * (shm[1][tk+0][tj+0][ti+1] - shm[1][tk+0][tj+0][ti+0]) +
+260: 		       mux4 * (shm[1][tk+0][tj+0][ti+2] - shm[1][tk+0][tj+0][ti+0]));
+261: 	r3 = strx_i * (mux1 * (shm[2][tk+0][tj+0][ti-2] - shm[2][tk+0][tj+0][ti+0]) +
+262: 		       mux2 * (shm[2][tk+0][tj+0][ti-1] - shm[2][tk+0][tj+0][ti+0]) +
+263: 		       mux3 * (shm[2][tk+0][tj+0][ti+1] - shm[2][tk+0][tj+0][ti+0]) +
+264: 		       mux4 * (shm[2][tk+0][tj+0][ti+2] - shm[2][tk+0][tj+0][ti+0]));
+265:       }
+266:
+267:       {
+268: 	float_sw4 muy1, muy2, muy3, muy4;
+269: 	muy1 = mu_jm1 * stry_jm1 - tf * (mu_ijk * stry_j + mu_jm2 * stry_jm2);
+270: 	muy2 = mu_jm2 * stry_jm2 + mu_jp1 * stry_jp1 + 3 * (mu_ijk * stry_j   + mu_jm1 * stry_jm1);
+271: 	muy3 = mu_jm1 * stry_jm1 + mu_jp2 * stry_jp2 + 3 * (mu_jp1 * stry_jp1 + mu_ijk * stry_j  );
+272: 	muy4 = mu_jp1 * stry_jp1 - tf * (mu_ijk * stry_j + mu_jp2 * stry_jp2);
+273:
+274: 	r1 += stry_j * (muy1 * (shm[0][tk+0][tj-2][ti+0] - shm[0][tk+0][tj+0][ti+0]) +
+275: 			muy2 * (shm[0][tk+0][tj-1][ti+0] - shm[0][tk+0][tj+0][ti+0]) +
+276: 			muy3 * (shm[0][tk+0][tj+1][ti+0] - shm[0][tk+0][tj+0][ti+0]) +
+277: 			muy4 * (shm[0][tk+0][tj+2][ti+0] - shm[0][tk+0][tj+0][ti+0]));
+278: 	r2 += stry_j * ((2 * muy1 + la_jm1 * stry_jm1 - tf * (la_ijk * stry_j + la_jm2 * stry_jm2)) *
+279: 			(shm[1][tk+0][tj-2][ti+0] - shm[1][tk+0][tj+0][ti+0]) +
+280: 			(2 * muy2 + la_jm2 * stry_jm2 + la_jp1 * stry_jp1 +
+281: 			 3 * (la_ijk * stry_j   + la_jm1 * stry_jm1)) *
+282: 			(shm[1][tk+0][tj-1][ti+0] - shm[1][tk+0][tj+0][ti+0]) +
+283: 			(2 * muy3 + la_jm1 * stry_jm1 + la_jp2 * stry_jp2 +
+284: 			 3 * (la_jp1 * stry_jp1 + la_ijk * stry_j  )) *
+285: 			(shm[1][tk+0][tj+1][ti+0] - shm[1][tk+0][tj+0][ti+0]) +
+286: 			(2 * muy4 + la_jp1 * stry_jp1 - tf * (la_ijk * stry_j  + la_jp2 * stry_jp2)) *
+287: 			(shm[1][tk+0][tj+2][ti+0] - shm[1][tk+0][tj+0][ti+0]));
+288: 	r3 += stry_j  *(muy1 * (shm[2][tk+0][tj-2][ti+0] - shm[2][tk+0][tj+0][ti+0]) +
+289: 			muy2 * (shm[2][tk+0][tj-1][ti+0] - shm[2][tk+0][tj+0][ti+0]) +
+290: 			muy3 * (shm[2][tk+0][tj+1][ti+0] - shm[2][tk+0][tj+0][ti+0]) +
+291: 			muy4 * (shm[2][tk+0][tj+2][ti+0] - shm[2][tk+0][tj+0][ti+0]));
+292:       }
+293:
+294:       {
+295: 	float_sw4 muz1, muz2, muz3, muz4;
+296: 	muz1 = mu_km1 * strz_km1 - tf * (mu_ijk * strz_k + mu_km2 * strz_km2);
+297: 	muz2 = mu_km2 * strz_km2 + mu_kp1 * strz_kp1 + 3 * (mu_ijk * strz_k   + mu_km1 * strz_km1);
+298: 	muz3 = mu_km1 * strz_km1 + mu_kp2 * strz_kp2 + 3 * (mu_kp1 * strz_kp1 + mu_ijk * strz_k);
+299: 	muz4 = mu_kp1 * strz_kp1 - tf * (mu_ijk * strz_k + mu_kp2 * strz_kp2);
+300: 	r1 += strz_k * (muz1 * (shm[0][tk-2][tj+0][ti+0] - shm[0][tk+0][tj+0][ti+0]) +
+301: 			muz2 * (shm[0][tk-1][tj+0][ti+0] - shm[0][tk+0][tj+0][ti+0]) +
+302: 			muz3 * (shm[0][tk+1][tj+0][ti+0] - shm[0][tk+0][tj+0][ti+0]) +
+303: 			muz4 * (shm[0][tk+2][tj+0][ti+0] - shm[0][tk+0][tj+0][ti+0]));
+304: 	r2 += strz_k * (muz1 * (shm[1][tk-2][tj+0][ti+0] - shm[1][tk+0][tj+0][ti+0]) +
+305: 			muz2 * (shm[1][tk-1][tj+0][ti+0] - shm[1][tk+0][tj+0][ti+0]) +
+306: 			muz3 * (shm[1][tk+1][tj+0][ti+0] - shm[1][tk+0][tj+0][ti+0]) +
+307: 			muz4 * (shm[1][tk+2][tj+0][ti+0] - shm[1][tk+0][tj+0][ti+0]));
+308: 	r3 += strz_k * ((2 * muz1 + la_km1 * strz_km1 - tf * (la_ijk * strz_k + la_km2 * strz_km2)) *
+309: 			(shm[2][tk-2][tj+0][ti+0] - shm[2][tk+0][tj+0][ti+0]) +
+310: 			(2 * muz2 + la_km2 * strz_km2 + la_kp1 * strz_kp1 +
+311: 			 3 * (la_ijk * strz_k   + la_km1 * strz_km1)) *
+312: 			(shm[2][tk-1][tj+0][ti+0] - shm[2][tk+0][tj+0][ti+0]) +
+313: 			(2 * muz3 + la_km1 * strz_km1 + la_kp2 * strz_kp2 +
+314: 			 3 * (la_kp1 * strz_kp1 + la_ijk * strz_k  )) *
+315: 			(shm[2][tk+1][tj+0][ti+0] - shm[2][tk+0][tj+0][ti+0]) +
+316: 			(2 * muz4 + la_kp1 * strz_kp1 - tf * (la_ijk * strz_k + la_kp2 * strz_kp2)) *
+317: 			(shm[2][tk+2][tj+0][ti+0] - shm[2][tk+0][tj+0][ti+0]));
+318:       }
+319:       r1 *= i6;
+320:       r2 *= i6;
+321:       r3 *= i6;
+322:
+323:       r1 += strx_i  * stry_j * i144 *
+324: 	(la_im2 * (shm[1][tk+0][tj-2][ti-2] - shm[1][tk+0][tj+2][ti-2] + 8 *
+325: 		   (-shm[1][tk+0][tj-1][ti-2] + shm[1][tk+0][tj+1][ti-2])) - 8 *
+326: 	 (la_im1 * (shm[1][tk+0][tj-2][ti-1] - shm[1][tk+0][tj+2][ti-1] + 8 *
+327: 		   (-shm[1][tk+0][tj-1][ti-1] + shm[1][tk+0][tj+1][ti-1]))) + 8 *
+328: 	 (la_ip1 * (shm[1][tk+0][tj-2][ti+1] - shm[1][tk+0][tj+2][ti+1] + 8 *
+329: 		   (-shm[1][tk+0][tj-1][ti+1] + shm[1][tk+0][tj+1][ti+1]))) -
+330: 	 (la_ip2 * (shm[1][tk+0][tj-2][ti+2] - shm[1][tk+0][tj+2][ti+2] + 8 *
+331: 		   (-shm[1][tk+0][tj-1][ti+2] + shm[1][tk+0][tj+1][ti+2]))))
+332:
+333:         + strx_i * strz_k * i144 *
+334: 	(la_im2 * (shm[2][tk-2][tj+0][ti-2] - shm[2][tk+2][tj+0][ti-2] + 8 *
+335: 		   (-shm[2][tk-1][tj+0][ti-2] + shm[2][tk+1][tj+0][ti-2])) - 8 *
+336: 	 (la_im1 * (shm[2][tk-2][tj+0][ti-1] - shm[2][tk+2][tj+0][ti-1] + 8 *
+337: 		   (-shm[2][tk-1][tj+0][ti-1] + shm[2][tk+1][tj+0][ti-1]))) + 8 *
+338: 	 (la_ip1 * (shm[2][tk-2][tj+0][ti+1] - shm[2][tk+2][tj+0][ti+1] + 8 *
+339: 		   (-shm[2][tk-1][tj+0][ti+1] + shm[2][tk+1][tj+0][ti+1]))) -
+340: 	 (la_ip2 * (shm[2][tk-2][tj+0][ti+2] - shm[2][tk+2][tj+0][ti+2] + 8 *
+341: 		   (-shm[2][tk-1][tj+0][ti+2] + shm[2][tk+1][tj+0][ti+2]))))
+342:
+343:         + strx_i * stry_j * i144 *
+344: 	(mu_jm2 * (shm[1][tk+0][tj-2][ti-2] - shm[1][tk+0][tj-2][ti+2] + 8 *
+345: 		   (-shm[1][tk+0][tj-2][ti-1] + shm[1][tk+0][tj-2][ti+1])) - 8 *
+346: 	 (mu_jm1 * (shm[1][tk+0][tj-1][ti-2] - shm[1][tk+0][tj-1][ti+2] + 8 *
+347: 		   (-shm[1][tk+0][tj-1][ti-1] + shm[1][tk+0][tj-1][ti+1]))) + 8 *
+348: 	 (mu_jp1 * (shm[1][tk+0][tj+1][ti-2] - shm[1][tk+0][tj+1][ti+2] + 8 *
+349: 		   (-shm[1][tk+0][tj+1][ti-1] + shm[1][tk+0][tj+1][ti+1]))) -
+350: 	 (mu_jp2 * (shm[1][tk+0][tj+2][ti-2] - shm[1][tk+0][tj+2][ti+2] + 8 *
+351: 		   (-shm[1][tk+0][tj+2][ti-1] + shm[1][tk+0][tj+2][ti+1]))))
+352:
+353:         + strx_i * strz_k * i144 *
+354: 	(mu_km2 * (shm[2][tk-2][tj+0][ti-2] - shm[2][tk-2][tj+0][ti+2] + 8 *
+355: 		   (-shm[2][tk-2][tj+0][ti-1] + shm[2][tk-2][tj+0][ti+1])) - 8 *
+356:  	 (mu_km1 * (shm[2][tk-1][tj+0][ti-2] - shm[2][tk-1][tj+0][ti+2] + 8 *
+357: 		   (-shm[2][tk-1][tj+0][ti-1] + shm[2][tk-1][tj+0][ti+1]))) + 8 *
+358:  	 (mu_kp1 * (shm[2][tk+1][tj+0][ti-2] - shm[2][tk+1][tj+0][ti+2] + 8 *
+359: 		   (-shm[2][tk+1][tj+0][ti-1] + shm[2][tk+1][tj+0][ti+1]))) -
+360: 	 (mu_kp2 * (shm[2][tk+2][tj+0][ti-2] - shm[2][tk+2][tj+0][ti+2] + 8 *
+361: 		   (-shm[2][tk+2][tj+0][ti-1] + shm[2][tk+2][tj+0][ti+1]))));
+362:
+363:       r2 += strx_i  *stry_j  *i144*
+364: 	(mu_im2 * (shm[0][tk+0][tj-2][ti-2] - shm[0][tk+0][tj+2][ti-2] + 8 *
+365: 		   (-shm[0][tk+0][tj-1][ti-2] + shm[0][tk+0][tj+1][ti-2])) - 8 *
+366: 	 (mu_im1 * (shm[0][tk+0][tj-2][ti-1] - shm[0][tk+0][tj+2][ti-1] + 8 *
+367: 		   (-shm[0][tk+0][tj-1][ti-1] + shm[0][tk+0][tj+1][ti-1]))) + 8 *
+368: 	 (mu_ip1 * (shm[0][tk+0][tj-2][ti+1] - shm[0][tk+0][tj+2][ti+1] + 8 *
+369: 		   (-shm[0][tk+0][tj-1][ti+1] + shm[0][tk+0][tj+1][ti+1]))) -
+370: 	 (mu_ip2 * (shm[0][tk+0][tj-2][ti+2] - shm[0][tk+0][tj+2][ti+2] + 8 *
+371: 		   (-shm[0][tk+0][tj-1][ti+2] + shm[0][tk+0][tj+1][ti+2]))))
+372:
+373:         + strx_i * stry_j * i144 *
+374: 	(la_jm2 * (shm[0][tk+0][tj-2][ti-2] - shm[0][tk+0][tj-2][ti+2] + 8 *
+375: 		   (-shm[0][tk+0][tj-2][ti-1] + shm[0][tk+0][tj-2][ti+1])) - 8 *
+376: 	 (la_jm1 * (shm[0][tk+0][tj-1][ti-2] - shm[0][tk+0][tj-1][ti+2] + 8 *
+377: 		   (-shm[0][tk+0][tj-1][ti-1] + shm[0][tk+0][tj-1][ti+1]))) + 8 *
+378: 	 (la_jp1 * (shm[0][tk+0][tj+1][ti-2] - shm[0][tk+0][tj+1][ti+2] + 8 *
+379: 		   (-shm[0][tk+0][tj+1][ti-1] + shm[0][tk+0][tj+1][ti+1]))) -
+380: 	 (la_jp2 * (shm[0][tk+0][tj+2][ti-2] - shm[0][tk+0][tj+2][ti+2] + 8 *
+381: 		   (-shm[0][tk+0][tj+2][ti-1] + shm[0][tk+0][tj+2][ti+1]))))
+382:
+383:         + stry_j * strz_k * i144 *
+384: 	(la_jm2 * (shm[2][tk-2][tj-2][ti+0] - shm[2][tk+2][tj-2][ti+0] + 8 *
+385: 		   (-shm[2][tk-1][tj-2][ti+0] + shm[2][tk+1][tj-2][ti+0])) - 8 *
+386: 	 (la_jm1 * (shm[2][tk-2][tj-1][ti+0] - shm[2][tk+2][tj-1][ti+0] + 8 *
+387: 		   (-shm[2][tk-1][tj-1][ti+0] + shm[2][tk+1][tj-1][ti+0]))) + 8 *
+388: 	 (la_jp1 * (shm[2][tk-2][tj+1][ti+0] - shm[2][tk+2][tj+1][ti+0] + 8 *
+389: 		   (-shm[2][tk-1][tj+1][ti+0] + shm[2][tk+1][tj+1][ti+0]))) -
+390: 	 (la_jp2 * (shm[2][tk-2][tj+2][ti+0] - shm[2][tk+2][tj+2][ti+0] + 8 *
+391: 		   (-shm[2][tk-1][tj+2][ti+0] + shm[2][tk+1][tj+2][ti+0]))))
+392:
+393:         + stry_j * strz_k * i144 *
+394: 	(mu_km2 * (shm[2][tk-2][tj-2][ti+0] - shm[2][tk-2][tj+2][ti+0] + 8 *
+395: 		   (-shm[2][tk-2][tj-1][ti+0] + shm[2][tk-2][tj+1][ti+0])) - 8 *
+396: 	 (mu_km1 * (shm[2][tk-1][tj-2][ti+0] - shm[2][tk-1][tj+2][ti+0] + 8 *
+397: 		   (-shm[2][tk-1][tj-1][ti+0] + shm[2][tk-1][tj+1][ti+0]))) + 8 *
+398: 	 (mu_kp1 * (shm[2][tk+1][tj-2][ti+0] - shm[2][tk+1][tj+2][ti+0] + 8 *
+399: 		   (-shm[2][tk+1][tj-1][ti+0] + shm[2][tk+1][tj+1][ti+0]))) -
+400: 	 (mu_kp2 * (shm[2][tk+2][tj-2][ti+0] - shm[2][tk+2][tj+2][ti+0] + 8 *
+401: 		   (-shm[2][tk+2][tj-1][ti+0] + shm[2][tk+2][tj+1][ti+0]))));
+402:
+403:       r3 += strx_i * strz_k * i144 *
+404: 	(mu_im2 * (shm[0][tk-2][tj+0][ti-2] - shm[0][tk+2][tj+0][ti-2] + 8 *
+405: 		   (-shm[0][tk-1][tj+0][ti-2] + shm[0][tk+1][tj+0][ti-2])) - 8 *
+406: 	 (mu_im1 * (shm[0][tk-2][tj+0][ti-1] - shm[0][tk+2][tj+0][ti-1] + 8 *
+407: 		   (-shm[0][tk-1][tj+0][ti-1] + shm[0][tk+1][tj+0][ti-1]))) + 8 *
+408: 	 (mu_ip1 * (shm[0][tk-2][tj+0][ti+1] - shm[0][tk+2][tj+0][ti+1] + 8 *
+409: 		   (-shm[0][tk-1][tj+0][ti+1] + shm[0][tk+1][tj+0][ti+1]))) -
+410: 	 (mu_ip2 * (shm[0][tk-2][tj+0][ti+2] - shm[0][tk+2][tj+0][ti+2] + 8 *
+411: 		   (-shm[0][tk-1][tj+0][ti+2] + shm[0][tk+1][tj+0][ti+2]))))
+412:
+413:         + stry_j  *strz_k*i144*
+414: 	(mu_jm2 * (shm[1][tk-2][tj-2][ti+0] - shm[1][tk+2][tj-2][ti+0] + 8 *
+415: 		   (- shm[1][tk-1][tj-2][ti+0]+shm[1][tk+1][tj-2][ti+0])) - 8 *
+416: 	 (mu_jm1 * (shm[1][tk-2][tj-1][ti+0] - shm[1][tk+2][tj-1][ti+0] + 8 *
+417: 		   (- shm[1][tk-1][tj-1][ti+0]+shm[1][tk+1][tj-1][ti+0]))) + 8 *
+418: 	 (mu_jp1 * (shm[1][tk-2][tj+1][ti+0] - shm[1][tk+2][tj+1][ti+0] + 8 *
+419: 		   (- shm[1][tk-1][tj+1][ti+0]+shm[1][tk+1][tj+1][ti+0]))) -
+420: 	 (mu_jp2 * (shm[1][tk-2][tj+2][ti+0] - shm[1][tk+2][tj+2][ti+0] + 8 *
+421: 		   (- shm[1][tk-1][tj+2][ti+0]+shm[1][tk+1][tj+2][ti+0]))))
+422:
+423:         + strx_i  *strz_k*i144*
+424: 	(la_km2*(shm[0][tk-2][tj+0][ti-2] - shm[0][tk-2][tj+0][ti+2] + 8 *
+425: 		   (- shm[0][tk-2][tj+0][ti-1]+shm[0][tk-2][tj+0][ti+1])) - 8*
+426: 	 (la_km1*(shm[0][tk-1][tj+0][ti-2] - shm[0][tk-1][tj+0][ti+2] + 8 *
+427: 		   (- shm[0][tk-1][tj+0][ti-1]+shm[0][tk-1][tj+0][ti+1]))) + 8*
+428: 	 (la_kp1*(shm[0][tk+1][tj+0][ti-2] - shm[0][tk+1][tj+0][ti+2] + 8 *
+429: 		   (- shm[0][tk+1][tj+0][ti-1]+shm[0][tk+1][tj+0][ti+1]))) -
+430: 	 (la_kp2*(shm[0][tk+2][tj+0][ti-2] - shm[0][tk+2][tj+0][ti+2] + 8 *
+431: 		   (- shm[0][tk+2][tj+0][ti-1]+shm[0][tk+2][tj+0][ti+1]))))
+432:
+433:         + stry_j  *strz_k*i144*
+434: 	(la_km2*(shm[1][tk-2][tj-2][ti+0] - shm[1][tk-2][tj+2][ti+0] + 8 *
+435: 		   (- shm[1][tk-2][tj-1][ti+0]+shm[1][tk-2][tj+1][ti+0])) - 8*
+436: 	 (la_km1*(shm[1][tk-1][tj-2][ti+0] - shm[1][tk-1][tj+2][ti+0] + 8 *
+437: 		   (- shm[1][tk-1][tj-1][ti+0]+shm[1][tk-1][tj+1][ti+0]))) + 8*
+438: 	 (la_kp1*(shm[1][tk+1][tj-2][ti+0] - shm[1][tk+1][tj+2][ti+0] + 8 *
+439: 		   (- shm[1][tk+1][tj-1][ti+0]+shm[1][tk+1][tj+1][ti+0]))) -
+440: 	 (la_kp2*(shm[1][tk+2][tj-2][ti+0] - shm[1][tk+2][tj+2][ti+0] + 8 *
+441: 		   (- shm[1][tk+2][tj-1][ti+0]+shm[1][tk+2][tj+1][ti+0]))));
+442:
+443:       if (pred) {
+444:
+445: 	int idx = k * nij + j * ni + i;
+446: 	float_sw4 fact = dt*dt / a_rho[idx];
+447: 	up(0,idx) = 2 * shm[0][tk][tj][ti] - um(0,idx) + fact * (cof * r1 + fo(0,idx));
+448: 	up(1,idx) = 2 * shm[1][tk][tj][ti] - um(1,idx) + fact * (cof * r2 + fo(1,idx));
+449: 	up(2,idx) = 2 * shm[2][tk][tj][ti] - um(2,idx) + fact * (cof * r3 + fo(2,idx));
+450:       }
+451:       else {
+452:
+453: 	int idx = k * nij + j * ni + i;
+454: 	float_sw4 fact = dt*dt*dt*dt / (12 * a_rho[idx]);
+455: 	up(0,idx) += fact * (cof * r1 + fo(0,idx));
+456: 	up(1,idx) += fact * (cof * r2 + fo(1,idx));
+457: 	up(2,idx) += fact * (cof * r3 + fo(2,idx));
+458:       }
+459:
+460:     }
+461:
+462:     if (iside == 0)
+463:       __syncthreads();
+464:
+465:   }
+466: }
+```cpp```
+# End Source Code
+# Begin Performance Analysis
+
+### ROOFLINE SUMMARY RHS4_X (CONFIGURED):
+{
+  "void rhs4_X<1, 0>(int, int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double, double)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details."
+  ],
+  "void rhs4_X<1, 1>(int, int, int, int, int, int, int, int, int, double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, const double *, double, double)": [
+    "All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details."
+  ]
+}
+
+# End Performance Analysis
+
+
+# Begin H100 Optimization Guidance
+Optimize specifically for NVIDIA H100 (Hopper) by targeting L2/cache reuse, HBM3 bandwidth, and Tensor Core throughput. Prioritize tiling and data locality: make global accesses coalesced/contiguous, reuse data from registers/shared memory/L2, and reduce redundant global traffic. Use Hopper async pipelines to hide memory latency: stage global→shared with cp.async / cuda::memcpy_async using double/triple buffering so loads overlap compute; keep the pipeline full instead of blocking on loads. If compute is matrix/attention-like, map work to Tensor Cores (WMMA/CUTLASS/cuBLASLt) and use mixed precision (FP16/BF16/TF32, FP8 when numerically safe) to increase throughput. Tune launch configuration to avoid occupancy cliffs: pick block sizes that sustain high occupancy without excessive register pressure or shared-memory usage; avoid large per-thread local arrays that cause spills. Reduce warp inefficiency: minimize divergence, expensive atomics, and unnecessary __syncthreads(); prefer warp-level primitives and cooperative groups where applicable. If memory-bound, reduce passes and consider fusion/batching to increase L2 hit rate; if compute-bound, increase ILP, unroll judiciously, and favor FMA-friendly instruction patterns.
+# End H100 Optimization Guidance
+
+# Begin Entrypoint Guardrails
+Entrypoint guardrails:
+1. The source does not contain a main() definition. Do NOT introduce one.
+2. Do NOT add wrapper executables, test harnesses, helper mains, or alternate standalone programs.
+3. Keep the existing top-level program structure intact; only optimize within the existing file structure.
+4. Do NOT change externally referenced function names or break linkage between existing declarations and definitions.
+# End Entrypoint Guardrails
+# Instructions
+You must optimize the source code provided above using only the performance data provided above. 
+
+Optimize the following HPC code for execution time.
+Can you give me the fixed optimized code that will replace the full source code including headers and main function body?
+2. Do not add line numbers to the generated code. 
+3. Do not rename or duplicate any kernel or function.
+4. Do not change any function signatures.
+5. Preserve the existing entry-point structure exactly. If the file already has main(), keep exactly one equivalent main(); if it does not, do not add one.
+6. Do not add duplicate definitions for main or for any externally linked function.
+7. Do not turn declarations into disconnected definitions or break declaration/definition linkage.
+8. Keep all changes inside the existing kernel/function bodies whenever possible.
+9. Do NOT introduce any new helper functions, utility functions, macros, templates, classes, structs, global variables, or other new top-level symbols outside the existing kernels/functions.
+10. Do NOT add wrapper load helpers such as ro(), custom ldg wrappers, or any new reusable abstraction outside the existing kernel/function body.
+11. Do NOT increase the total shared-memory footprint of any kernel beyond the original source. Do not enlarge existing __shared__ arrays, do not add new shared-memory tiles, and prefer register/cache/read-only load optimizations over larger shared-memory staging.
+12. Use the performance analysis reference number(s) to guide your changes.
+13. Return:
+   (a) the full source code including the optimized kernels inside ``` block (starts with ``` and ends with ``` )
+   (b) optimizations list = [{'lines': [...], 'reason': '...'}]
+   (c) suggested_but_not_applied list = [{'lines': [...], 'reason': '...'}]
+14. Do not generate more than one copy of the same kernel.
+15. Do not invent any new kernels or placeholder code.
+
+ONLY respond with the updated code and two structured lists. No explanation, no notes, no markdown titles. Follow this format exactly.

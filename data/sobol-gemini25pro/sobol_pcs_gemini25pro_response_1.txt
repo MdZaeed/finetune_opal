@@ -1,0 +1,127 @@
+```cpp
+#include "sobol.h"
+#include "sobol_gpu.h"
+
+#define k_2powneg32 2.3283064E-10F
+
+__global__
+void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+                     unsigned *__restrict__ d_directions,
+                     float *__restrict__ d_output)
+{
+    // This assumes n_directions is a compile-time constant defined in sobol.h
+    __shared__ unsigned int v[n_directions];
+
+    d_directions += n_directions * blockIdx.y;
+    d_output += n_vectors * blockIdx.y;
+
+    // Load direction vectors into shared memory.
+    // Using a strided loop helps balance the workload among threads in the block,
+    // which can reduce stalls at the following __syncthreads.
+    // This addresses stall_barrier_ratio.
+    for (unsigned int i = threadIdx.x; i < n_directions; i += blockDim.x)
+    {
+        v[i] = d_directions[i];
+    }
+
+    __syncthreads();
+
+    int i0     = threadIdx.x + blockIdx.x * blockDim.x;
+    int stride = gridDim.x * blockDim.x;
+
+    // The grid-stride is a power of two. Pre-calculating log2(stride)
+    // avoids two redundant __ffs calls inside the loops.
+    // This addresses stall_math_ratio and reduces latency.
+    unsigned int log2_stride = 31 - __clz(stride);
+
+    unsigned int g = i0 ^ (i0 >> 1);
+
+    unsigned int X = 0;
+    unsigned int mask;
+
+    for (unsigned int k = 0 ; k < log2_stride ; k++)
+    {
+        mask = - (g & 1);
+        X ^= mask & v[k];
+        g = g >> 1;
+    }
+
+    if (i0 < n_vectors)
+    {
+        d_output[i0] = (float)X * k_2powneg32;
+    }
+
+    // Use the pre-calculated log2_stride to get the index.
+    // Original was v[__ffs(stride) - 2], which is v[log2(stride) - 1].
+    unsigned int v_log2stridem1 = v[log2_stride - 1];
+    unsigned int v_stridemask = stride - 1;
+
+    for (unsigned int i = i0 + stride ; i < n_vectors ; i += stride)
+    {
+        X ^= v_log2stridem1 ^ v[__ffs(~((i - stride) | v_stridemask)) - 1];
+        d_output[i] = (float)X * k_2powneg32;
+    }
+}
+
+double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+                unsigned int *d_directions, float *d_output)
+{
+    const int threadsperblock = 64;
+
+    dim3 dimGrid;
+    dim3 dimBlock;
+
+    dimGrid.y = n_dimensions;
+
+    if (n_dimensions < (4 * 24))
+    {
+        dimGrid.x = 4 * 24;
+    }
+    else
+    {
+        dimGrid.x = 1;
+    }
+
+    if (dimGrid.x > (unsigned int)(n_vectors / threadsperblock))
+    {
+        dimGrid.x = (n_vectors + threadsperblock - 1) / threadsperblock;
+    }
+
+    unsigned int targetDimGridX = dimGrid.x;
+    for (dimGrid.x = 1 ; dimGrid.x < targetDimGridX ; dimGrid.x *= 2);
+
+    dimBlock.x = threadsperblock;
+
+    cudaDeviceSynchronize();
+    auto start = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < repeat; i++)
+      sobolGPU_kernel <<<dimGrid, dimBlock>>> (
+        n_vectors, n_dimensions, d_directions, d_output);
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    return time;
+}
+```
+```json
+{
+  "optimizations": [
+    {
+      "lines": [57, 58, 59, 60],
+      "reason": "The original `if (threadIdx.x < n_directions)` block creates workload imbalance, as some threads perform a global memory read while others are idle. This causes `stall_barrier_ratio` (analysis #15) at the `__syncthreads`. The replacement strided loop `for (unsigned int i = threadIdx.x; i < n_directions; i += blockDim.x)` distributes the memory loads more evenly across all threads in the block, reducing stalls at the barrier."
+    },
+    {
+      "lines": [83, 123],
+      "reason": "The expression `__ffs(stride)` was computed twice in the kernel. Since `stride` is constant for all threads, this is redundant. By pre-calculating `log2_stride = 31 - __clz(stride)` once at the beginning of the kernel, we eliminate these redundant computations. This addresses `stall_math_ratio` (analysis #8) and reduces instruction latency, which contributes to `stall_wait_ratio` (analysis #6, #8)."
+    }
+  ],
+  "suggested_but_not_applied": [
+    {
+      "lines": [134],
+      "reason": "This line is a major performance bottleneck, causing numerous `stall_wait_ratio`, `stall_long_sb_ratio`, and `stall_short_sb_ratio` stalls (analysis #1, #2, #6, #16). The stalls are due to a long loop-carried dependency on the variable `X`, the latency of the `__ffs` instruction, and likely shared memory bank conflicts from the pseudo-random access pattern into `v`. Optimizing this would require a significant algorithmic rewrite, which is beyond the scope of local code changes."
+    }
+  ]
+}
+```

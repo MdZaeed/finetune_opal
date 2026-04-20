@@ -1,0 +1,312 @@
+```cpp
+#include <stdio.h>
+#include <stdlib.h>
+#include <chrono>
+#include <random>
+#include <cuda.h>
+#include <cub/cub.cuh>
+#include "reference.h"
+#include <cfloat> // Added for FLT_MAX
+
+#define GPU_NUM_THREADS 256
+
+template <typename T>
+__device__ void BlockReduce(T &input) {
+  typedef cub::BlockReduce<T, GPU_NUM_THREADS> BlockReduce;
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+  input = BlockReduce(temp_storage).Sum(input);
+}
+
+// Preconditions:
+// - N, D, top_k are positive integers.
+// - Xdata points to N * D valid float values on device memory.
+// - labelData points to N valid int values on device memory, where 0 <= labelData[i] < D for all i.
+// - accuracy points to a valid int on device memory, initialized to 0.
+// - blockDim.x is GPU_NUM_THREADS.
+// Postconditions:
+// - The value pointed to by accuracy will be incremented by the total number of rows r (from 0 to N-1)
+//   such that the count of elements Xdata[r * D + c] (for 0 <= c < D) satisfying
+//   (Xdata[r * D + c] > Xdata[r * D + labelData[r]]) or
+//   (Xdata[r * D + c] == Xdata[r * D + labelData[r]] and c <= labelData[r])
+//   is less than or equal to top_k.
+__global__
+void accuracy_kernel(
+    const int N,
+    const int D,
+    const int top_k,
+    const float* __restrict__ Xdata,
+    const int* __restrict__ labelData,
+    int* accuracy)
+{
+  __shared__ float s_label_pred;
+  __shared__ int s_label;
+  __shared__ float s_Xdata_tile[GPU_NUM_THREADS]; // Shared memory for a tile of Xdata
+
+  int count = 0;
+
+  // Loop Invariant: At the beginning of each iteration, 'count' holds the number of rows processed so far by this block
+  // that satisfy the 'top_k' condition. 's_label' and 's_label_pred' (after __syncthreads()) correctly store
+  // labelData[row] and Xdata[row * D + labelData[row]] for the current 'row'.
+  for (int row = blockIdx.x; row < N; row += gridDim.x) {
+    // Load label and label_pred into shared memory by thread 0
+    if (threadIdx.x == 0) {
+      s_label = labelData[row];
+      s_label_pred = Xdata[row * D + s_label];
+    }
+    __syncthreads(); // Ensure shared memory is updated for all threads
+
+    const int label = s_label;
+    const float label_pred = s_label_pred;
+
+    int ngt = 0;
+    const float* row_ptr = Xdata + row * D;
+
+    // Loop Invariant: At the beginning of each iteration, 'ngt' holds the partial sum of elements satisfying the condition
+    // for the current 'row' from previously processed tiles. After __syncthreads() following the load,
+    // 's_Xdata_tile[threadIdx.x]' contains Xdata[row * D + tile_start_col + threadIdx.x] (if in bounds, else sentinel).
+    // 'label' and 'label_pred' remain constant throughout the inner loop for the current 'row'.
+    // Iterate over D in chunks of GPU_NUM_THREADS, loading into shared memory to improve data locality and coalescing.
+    for (int tile_start_col = 0; tile_start_col < D; tile_start_col += GPU_NUM_THREADS) {
+        // Each thread loads one element into shared memory from a contiguous segment of global memory.
+        int global_col = tile_start_col + threadIdx.x;
+        if (global_col < D) {
+            s_Xdata_tile[threadIdx.x] = row_ptr[global_col];
+        } else {
+            // Handle out-of-bounds access for the last tile by setting a value that won't satisfy the condition.
+            s_Xdata_tile[threadIdx.x] = -FLT_MAX;
+        }
+        __syncthreads(); // Ensure all loads are complete before processing from shared memory
+
+        // Now, each thread processes the element it loaded from shared memory.
+        if (global_col < D) {
+            float pred = s_Xdata_tile[threadIdx.x];
+            if (pred > label_pred || (pred == label_pred && global_col <= label)) {
+                ++ngt;
+            }
+        }
+    }
+
+    BlockReduce(ngt); // Sum up ngt from all threads in the block
+    if (ngt <= top_k) {
+      ++count;
+    }
+    __syncthreads(); // Synchronize before next row iteration to ensure 'count' is stable
+  }
+  if (threadIdx.x == 0) {
+    atomicAdd(accuracy, count);
+  }
+}
+
+
+// Preconditions:
+// - N, D, top_k are positive integers.
+// - Xdata points to N * D valid float values on device memory.
+// - labelData points to N valid int values on device memory, where 0 <= labelData[i] < D for all i.
+// - accuracy points to a valid int on device memory, initialized to 0.
+// - blockDim.x is GPU_NUM_THREADS.
+// Postconditions:
+// - The value pointed to by accuracy will be incremented by the total number of rows r (from 0 to N-1)
+//   such that the count of elements Xdata[r * D + c] (for 0 <= c < D) satisfying
+//   (Xdata[r * D + c] > Xdata[r * D + labelData[r]]) or
+//   (Xdata[r * D + c] == Xdata[r * D + labelData[r]] and c <= labelData[r])
+//   is less than or equal to top_k.
+__global__
+void accuracy_kernel2(
+    const int N,
+    const int D,
+    const int top_k,
+    const float* __restrict__ Xdata,
+    const int*   __restrict__ labelData,
+    int* accuracy)
+{
+  __shared__ float s_label_pred;
+  __shared__ int s_label;
+  __shared__ float s_Xdata_tile[GPU_NUM_THREADS]; // Shared memory for a tile of Xdata
+
+  int count = 0;
+
+  // Loop Invariant: At the beginning of each iteration, 'count' holds the number of rows processed so far by this block
+  // that satisfy the 'top_k' condition. 's_label' and 's_label_pred' (after __syncthreads()) correctly store
+  // labelData[row] and Xdata[row * D + labelData[row]] for the current 'row'.
+  for (int row = blockIdx.x; row < N; row += gridDim.x) {
+
+    if (threadIdx.x == 0) {
+      s_label = labelData[row];
+      s_label_pred = Xdata[row * D + s_label];
+    }
+    __syncthreads();
+
+    const int   label      = s_label;
+    const float label_pred = s_label_pred;
+
+    int ngt = 0;
+    const float* row_ptr = Xdata + row * D;
+
+    // Loop Invariant: At the beginning of each iteration, 'ngt' holds the partial sum of elements satisfying the condition
+    // for the current 'row' from previously processed tiles. After __syncthreads() following the load,
+    // 's_Xdata_tile[threadIdx.x]' contains Xdata[row * D + tile_start_col + threadIdx.x] (if in bounds, else sentinel).
+    // 'label' and 'label_pred' remain constant throughout the inner loop for the current 'row'.
+    // Iterate over D in chunks of GPU_NUM_THREADS, loading into shared memory to improve data locality and coalescing.
+    for (int tile_start_col = 0; tile_start_col < D; tile_start_col += GPU_NUM_THREADS) {
+        // Each thread loads one element into shared memory from a contiguous segment of global memory.
+        int global_col = tile_start_col + threadIdx.x;
+        if (global_col < D) {
+            s_Xdata_tile[threadIdx.x] = row_ptr[global_col];
+        } else {
+            // Handle out-of-bounds access for the last tile
+            s_Xdata_tile[threadIdx.x] = -FLT_MAX;
+        }
+        __syncthreads(); // Ensure all loads are complete before processing from shared memory
+
+        // Now, each thread processes the element it loaded from shared memory.
+        if (global_col < D) {
+            float pred = s_Xdata_tile[threadIdx.x];
+            ngt += (pred > label_pred || (pred == label_pred && global_col <= label));
+        }
+    }
+
+    BlockReduce(ngt);
+
+    if (threadIdx.x == 0 && ngt <= top_k) {
+      ++count;
+    }
+    __syncthreads();
+  }
+
+  if (threadIdx.x == 0 && count > 0) {
+    atomicAdd(accuracy, count);
+  }
+}
+
+
+int main(int argc, char* argv[])
+{
+  if (argc != 5) {
+    printf("Usage: %s <number of rows> <number of columns> <top K> <repeat>\n", argv[0]);
+    return 1;
+  }
+  const int nrows = atoi(argv[1]);
+  const int ndims = atoi(argv[2]);
+  const int top_k = atoi(argv[3]);
+  const int repeat = atoi(argv[4]);
+
+  const int data_size = nrows * ndims;
+
+  const int label_size_bytes = nrows * sizeof(int);
+  const size_t data_size_bytes = data_size * sizeof(float);
+
+  int *label = (int*) malloc (label_size_bytes);
+
+  srand(123);
+  for (int i = 0; i < nrows; i++)
+    label[i] = rand() % ndims;
+
+  float *data = (float*) malloc (data_size_bytes);
+
+  std::default_random_engine g (123);
+  std::uniform_real_distribution<float> distr (0.f, 1.f);
+  for (int i = 0; i < data_size; i++) {
+    data[i] = distr(g);
+  }
+
+  int count_ref = reference(nrows, ndims, top_k, data, label);
+
+  int *d_label;
+  cudaMalloc((void**)&d_label, label_size_bytes);
+  cudaMemcpy(d_label, label, label_size_bytes, cudaMemcpyHostToDevice);
+
+  float *d_data;
+  cudaMalloc((void**)&d_data, data_size_bytes);
+  cudaMemcpy(d_data, data, data_size_bytes, cudaMemcpyHostToDevice);
+
+  int *d_count;
+  cudaMalloc((void**)&d_count, sizeof(int));
+
+  cudaDeviceSynchronize();
+  dim3 block (GPU_NUM_THREADS);
+
+  for (int ngrid = nrows / 4; ngrid <= nrows; ngrid += nrows / 4) {
+
+    dim3 grid (ngrid);
+    printf("Grid size is %d\n", ngrid);
+
+    auto start = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < repeat; i++) {
+      cudaMemset(d_count, 0, sizeof(int));
+      accuracy_kernel<<<grid, block>>>(nrows, ndims, top_k, d_data, d_label, d_count);
+    }
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    printf("Average execution time of accuracy kernel: %f (us)\n", (time * 1e-3f) / repeat);
+
+    int count;
+    cudaMemcpy(&count, d_count, sizeof(int), cudaMemcpyDeviceToHost);
+    printf("%s\n", (count == count_ref) ? "PASS" : "FAIL");
+
+
+    start = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < repeat; i++) {
+      cudaMemset(d_count, 0, sizeof(int));
+      accuracy_kernel2<<<grid, block>>>(nrows, ndims, top_k, d_data, d_label, d_count);
+    }
+
+    cudaDeviceSynchronize();
+    end = std::chrono::steady_clock::now();
+    time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    printf("Average execution time of accuracy kernel2: %f (us)\n", (time * 1e-3f) / repeat);
+    cudaMemcpy(&count, d_count, sizeof(int), cudaMemcpyDeviceToHost);
+    printf("%s\n", (count == count_ref) ? "PASS" : "FAIL");
+  }
+
+  cudaFree(d_label);
+  cudaFree(d_data);
+  cudaFree(d_count);
+
+  free(label);
+  free(data);
+
+  return 0;
+}
+```
+```json
+[
+  {
+    "lines": [6, 49],
+    "reason": "Added <cfloat> header for FLT_MAX, which is used as a sentinel value in shared memory tiling."
+  },
+  {
+    "lines": [30, 31, 32],
+    "reason": "Added __shared__ variables s_label_pred, s_label, and s_Xdata_tile to accuracy_kernel. This caches frequently accessed data (label and label_pred) and enables shared memory tiling for Xdata, addressing L1TEX stalls and improving L2 cache hit rates (Roofline Summary point 3) and DRAM throughput (Roofline Summary point 2)."
+  },
+  {
+    "lines": [35, 36, 37, 38],
+    "reason": "Hoisted the loading of 'label' and 'label_pred' into shared memory by thread 0, followed by a __syncthreads(). This reduces redundant global memory reads for these values within the block for each row, improving data locality and reducing L1TEX stalls (Roofline Summary point 3)."
+  },
+  {
+    "lines": [44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62],
+    "reason": "Replaced the original strided global memory access loop in accuracy_kernel with a shared memory tiling loop. Each block now loads a contiguous chunk of 'D' elements into shared memory (s_Xdata_tile) in a coalesced manner, then processes these elements from fast shared memory. This directly addresses the inefficient strided memory access pattern (Roofline Summary point 2) and L1TEX stalls (Roofline Summary point 3), improving L2 cache reuse and HBM3 bandwidth utilization."
+  },
+  {
+    "lines": [61, 62],
+    "reason": "Added __shared__ float s_Xdata_tile[GPU_NUM_THREADS] to accuracy_kernel2. This enables shared memory tiling for Xdata, addressing L1TEX stalls and improving L2 cache hit rates (Roofline Summary point 3) and DRAM throughput (Roofline Summary point 2)."
+  },
+  {
+    "lines": [78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94],
+    "reason": "Replaced the original unrolled strided global memory access loops in accuracy_kernel2 with a shared memory tiling loop. Similar to accuracy_kernel, this ensures coalesced global memory reads into shared memory (s_Xdata_tile) and subsequent processing from fast shared memory, directly addressing the inefficient strided memory access pattern (Roofline Summary point 2) and L1TEX stalls (Roofline Summary point 3)."
+  }
+]
+```
+```json
+[
+  {
+    "lines": [
+      "N/A"
+    ],
+    "reason": "The Gemini compatibility guardrails prevent the use of advanced asynchronous memory operations (e.g., cp.async, cuda::memcpy_async) and new CUDA C++ synchronization primitives (e.g., cuda::pipeline, cuda::barrier) that would be highly beneficial for H100 optimization, especially for hiding memory latency. These were considered but not applied due to the restrictions."
+  }
+]
+```

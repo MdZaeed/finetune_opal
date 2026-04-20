@@ -1,0 +1,329 @@
+```
+#include <stdio.h>
+#include <stdlib.h>
+#include <chrono>
+#include <random>
+#include <cuda.h>
+#include <cub/cub.cuh>
+#include "reference.h"
+
+#define GPU_NUM_THREADS 256
+
+/*
+Mathematical specification:
+
+Preconditions:
+- N >= 0, D >= 0, top_k >= 0
+- Xdata points to an array of length at least N*D
+- labelData points to an array of length at least N
+- For all 0 <= i < N: 0 <= labelData[i] < D
+
+Postconditions:
+- *accuracy equals the number of rows r in [0, N) such that
+  Count_{c in [0, D)} [ X[r*D + c] > X[r*D + label[r]] OR
+                        (X[r*D + c] == X[r*D + label[r]] AND c <= label[r]) ] <= top_k
+
+Loop invariants (for per-row inner loop over columns):
+- Partition invariant: For a fixed row r, the sets S_t = { c | c = t + k*blockDim.x, 0 <= k, c < D } for t in [0, blockDim.x) form a disjoint partition of [0, D).
+- Per-thread accumulation invariant: At any iteration of the inner loop, each thread's ngt holds the sum over its visited columns so far of the predicate P(c) = (X[r*D + c] > label_pred) OR (X[r*D + c] == label_pred AND c <= label).
+- Global reduction invariant: The sum of all per-thread ngt at loop exit equals the total over all columns c in [0, D) of P(c).
+
+Proof sketch of correctness under optimization:
+- Broadcasting label and label_pred via shared memory preserves values since only thread 0 writes them and a barrier follows; all threads subsequently load identical scalars. The pre-loop barrier in each iteration ensures the previous iteration's readers have finished before any writer overwrites shared memory.
+- The 4x ILP unrolling transforms the per-thread iteration from stride-1 in "loop-iterations" to computing up to 4 stride-separated elements per software iteration, but still exactly enumerates the same S_t set without duplication or omission, preserving the partition invariant.
+- The custom BlockReduce performs a 2-stage (warp, then block) associative reduction using __shfl_down_sync and shared memory for warp leaders. Since integer addition is associative and commutative, the result equals the sum of per-thread ngt. The function writes the sum to thread 0 only, matching prior usage (CUB's BlockReduce.Sum returns the aggregate to thread 0).
+- Therefore, count is incremented iff ngt <= top_k for each row, preserving the postcondition.
+*/
+
+/* Lightweight block-wide sum reduction using warp shuffles.
+   Semantics: After return, only thread 0 of the block has 'input' equal to the block-wide sum.
+   Other threads' 'input' is unspecified and must not be used.
+   This replaces the CUB BlockReduce to reduce barrier and long scoreboard stalls
+   (addresses PC SUMMARY lines 151, 154, 156, 159, 171, 176-182, 270).
+*/
+template <typename T>
+__device__ __forceinline__ void BlockReduce(T &input) {
+  // First stage: warp-level reduction
+  unsigned mask = 0xFFFFFFFFu;
+  T v = input;
+  // Reduce within warp
+  for (int offset = warpSize >> 1; offset > 0; offset >>= 1) {
+    v += __shfl_down_sync(mask, v, offset);
+  }
+
+  // Shared memory for warp leaders
+  __shared__ T warp_sums[(GPU_NUM_THREADS + 31) / 32];
+  int lane = threadIdx.x & 31;
+  int wid  = threadIdx.x >> 5;
+
+  if (lane == 0) {
+    warp_sums[wid] = v;
+  }
+
+  __syncthreads();
+
+  // Second stage: first warp reduces the warp_sums
+  T total = 0;
+  if (wid == 0) {
+    total = (lane < (blockDim.x + 31) / 32) ? warp_sums[lane] : T(0);
+    for (int offset = warpSize >> 1; offset > 0; offset >>= 1) {
+      total += __shfl_down_sync(mask, total, offset);
+    }
+    if (lane == 0) input = total;
+  }
+}
+
+/*
+Kernel: accuracy_kernel
+- Optimizations:
+  - Broadcast label and label_pred via shared memory to eliminate 256x redundant loads per row
+    (addresses stalls at PC SUMMARY lines 25, 26, 29 via reduced L1TEX scoreboard waits).
+  - 4x ILP unrolling in inner loop for better memory-level parallelism and reduced stall_long_sb_ratio
+    (addresses PC SUMMARY lines 28-31, 34-36, 41-43; Roofline: high L1TEX scoreboard waits).
+  - Custom BlockReduce reduces synchronization overhead vs. CUB (addresses PC SUMMARY lines 151, 154, 156, 159, 171, 176-182, 270).
+  - Limit atomics by performing a single atomicAdd per block and only if count>0 (addresses PC SUMMARY lines 41, 107).
+  - Reordered barriers: per-iteration initial barrier + post-broadcast barrier only.
+*/
+__global__ __launch_bounds__(GPU_NUM_THREADS)
+void accuracy_kernel(
+    const int N,
+    const int D,
+    const int top_k,
+    const float* __restrict__ Xdata,
+    const int* __restrict__ labelData,
+    int* accuracy)
+{
+  __shared__ float s_label_pred;
+  __shared__ int   s_label;
+
+  int count = 0;
+
+  for (int row = blockIdx.x; row < N; row += gridDim.x) {
+
+    // Start-of-iteration barrier: ensures prior iteration finished using shared memory
+    __syncthreads();
+
+    if (threadIdx.x == 0) {
+      s_label = labelData[row];
+      s_label_pred = Xdata[row * D + s_label];
+    }
+
+    // Broadcast barrier: ensure all threads see s_label and s_label_pred
+    __syncthreads();
+
+    const int   label      = s_label;
+    const float label_pred = s_label_pred;
+
+    int ngt = 0;
+
+    // Loop invariant maintained: ngt is the sum of predicate over columns visited so far by this thread.
+    const float* __restrict__ row_ptr = Xdata + row * D;
+    int col = threadIdx.x;
+
+    // 4x ILP unrolling
+#pragma unroll 1
+    for (; col + 3 * blockDim.x < D; col += 4 * blockDim.x) {
+      float p0 = row_ptr[col];
+      float p1 = row_ptr[col +     blockDim.x];
+      float p2 = row_ptr[col + 2 * blockDim.x];
+      float p3 = row_ptr[col + 3 * blockDim.x];
+
+      ngt += (p0 > label_pred) || (p0 == label_pred && col                   <= label);
+      ngt += (p1 > label_pred) || (p1 == label_pred && col +     blockDim.x  <= label);
+      ngt += (p2 > label_pred) || (p2 == label_pred && col + 2 * blockDim.x  <= label);
+      ngt += (p3 > label_pred) || (p3 == label_pred && col + 3 * blockDim.x  <= label);
+    }
+
+    for (; col < D; col += blockDim.x) {
+      float pred = row_ptr[col];
+      ngt += (pred > label_pred) || (pred == label_pred && col <= label);
+    }
+
+    // Block-wide reduction; only thread 0 receives the sum in 'ngt'
+    BlockReduce(ngt);
+
+    if (threadIdx.x == 0 && ngt <= top_k) {
+      ++count;
+    }
+  }
+
+  if (threadIdx.x == 0 && count > 0) {
+    atomicAdd(accuracy, count);
+  }
+}
+
+/*
+Kernel: accuracy_kernel2
+- Kept shared broadcast and 4x ILP unrolling.
+- Switched to custom BlockReduce (as above) to reduce stalls on CUB internals.
+- Reordered synchronization: use start-of-iteration barrier + post-broadcast barrier; remove trailing sync.
+*/
+__global__ __launch_bounds__(GPU_NUM_THREADS)
+void accuracy_kernel2(
+    const int N,
+    const int D,
+    const int top_k,
+    const float* __restrict__ Xdata,
+    const int*   __restrict__ labelData,
+    int* accuracy)
+{
+  __shared__ float s_label_pred;
+  __shared__ int s_label;
+
+  int count = 0;
+
+  for (int row = blockIdx.x; row < N; row += gridDim.x) {
+
+    // Start-of-iteration barrier to protect shared variables across rows
+    __syncthreads();
+
+    if (threadIdx.x == 0) {
+      s_label = labelData[row];
+      s_label_pred = Xdata[row * D + s_label];
+    }
+    __syncthreads();
+
+    const int   label      = s_label;
+    const float label_pred = s_label_pred;
+
+    int ngt = 0;
+    const float* __restrict__ row_ptr = Xdata + row * D;
+    int col = threadIdx.x;
+
+#pragma unroll 1
+    for (; col + 3 * blockDim.x < D; col += 4 * blockDim.x) {
+      float p0 = row_ptr[col];
+      float p1 = row_ptr[col +     blockDim.x];
+      float p2 = row_ptr[col + 2 * blockDim.x];
+      float p3 = row_ptr[col + 3 * blockDim.x];
+
+      ngt += (p0 > label_pred) || (p0 == label_pred && col                   <= label);
+      ngt += (p1 > label_pred) || (p1 == label_pred && col +     blockDim.x  <= label);
+      ngt += (p2 > label_pred) || (p2 == label_pred && col + 2 * blockDim.x  <= label);
+      ngt += (p3 > label_pred) || (p3 == label_pred && col + 3 * blockDim.x  <= label);
+    }
+    for (; col < D; col += blockDim.x) {
+      float pred = row_ptr[col];
+      ngt += (pred > label_pred) || (pred == label_pred && col <= label);
+    }
+
+    BlockReduce(ngt);
+
+    if (threadIdx.x == 0 && ngt <= top_k) {
+      ++count;
+    }
+  }
+
+  if (threadIdx.x == 0 && count > 0) {
+    atomicAdd(accuracy, count);
+  }
+}
+
+int main(int argc, char* argv[])
+{
+  if (argc != 5) {
+    printf("Usage: %s <number of rows> <number of columns> <top K> <repeat>\n", argv[0]);
+    return 1;
+  }
+  const int nrows = atoi(argv[1]);
+  const int ndims = atoi(argv[2]);
+  const int top_k = atoi(argv[3]);
+  const int repeat = atoi(argv[4]);
+
+  const int data_size = nrows * ndims;
+
+  const int label_size_bytes = nrows * sizeof(int);
+  const size_t data_size_bytes = data_size * sizeof(float);
+
+  int *label = (int*) malloc (label_size_bytes);
+
+  srand(123);
+  for (int i = 0; i < nrows; i++)
+    label[i] = rand() % ndims;
+
+  float *data = (float*) malloc (data_size_bytes);
+
+  std::default_random_engine g (123);
+  std::uniform_real_distribution<float> distr (0.f, 1.f);
+  for (int i = 0; i < data_size; i++) {
+    data[i] = distr(g);
+  }
+
+  int count_ref = reference(nrows, ndims, top_k, data, label);
+
+  int *d_label;
+  cudaMalloc((void**)&d_label, label_size_bytes);
+  cudaMemcpy(d_label, label, label_size_bytes, cudaMemcpyHostToDevice);
+
+  float *d_data;
+  cudaMalloc((void**)&d_data, data_size_bytes);
+  cudaMemcpy(d_data, data, data_size_bytes, cudaMemcpyHostToDevice);
+
+  int *d_count;
+  cudaMalloc((void**)&d_count, sizeof(int));
+
+  // Prefer larger L1 on Hopper for memory-latency-bound kernels
+  cudaFuncSetCacheConfig(accuracy_kernel,  cudaFuncCachePreferL1);
+  cudaFuncSetCacheConfig(accuracy_kernel2, cudaFuncCachePreferL1);
+
+  cudaDeviceSynchronize();
+  dim3 block (GPU_NUM_THREADS);
+
+  for (int ngrid = nrows / 4; ngrid <= nrows; ngrid += max(1, nrows / 4)) {
+
+    dim3 grid (ngrid);
+    printf("Grid size is %d\n", ngrid);
+
+    auto start = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < repeat; i++) {
+      cudaMemset(d_count, 0, sizeof(int));
+      accuracy_kernel<<<grid, block>>>(nrows, ndims, top_k, d_data, d_label, d_count);
+    }
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    printf("Average execution time of accuracy kernel: %f (us)\n", (time * 1e-3f) / repeat);
+
+    int count;
+    cudaMemcpy(&count, d_count, sizeof(int), cudaMemcpyDeviceToHost);
+    printf("%s\n", (count == count_ref) ? "PASS" : "FAIL");
+
+
+    start = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < repeat; i++) {
+      cudaMemset(d_count, 0, sizeof(int));
+      accuracy_kernel2<<<grid, block>>>(nrows, ndims, top_k, d_data, d_label, d_count);
+    }
+
+    cudaDeviceSynchronize();
+    end = std::chrono::steady_clock::now();
+    time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    printf("Average execution time of accuracy kernel2: %f (us)\n", (time * 1e-3f) / repeat);
+    cudaMemcpy(&count, d_count, sizeof(int), cudaMemcpyDeviceToHost);
+    printf("%s\n", (count == count_ref) ? "PASS" : "FAIL");
+  }
+
+  cudaFree(d_label);
+  cudaFree(d_data);
+  cudaFree(d_count);
+
+  free(label);
+  free(data);
+
+  return 0;
+}
+```
+optimizations list = [
+  {'lines': ['11-16 (BlockReduce template)', '18-48 (accuracy_kernel body)', '51-106 (accuracy_kernel2 body)', 'main: cudaFuncSetCacheConfig calls'], 'reason': 'Replaced CUB BlockReduce with lightweight warp+block reduction to reduce stall_wait_ratio and stall_barrier_ratio observed in PC SUMMARY lines 151, 154, 156, 159, 171, 176-182, 270. Broadcasted label/label_pred via shared memory to eliminate redundant loads (addresses stall_long_sb_ratio and L1TEX scoreboard waits at lines 25, 26, 29). Added 4x ILP unrolling to improve memory-level parallelism and reduce Roofline-reported L1TEX dependency stalls. Limited atomics to count>0 to mitigate stalls at lines 41 and 107.'},
+  {'lines': ['accuracy_kernel inner loops', 'accuracy_kernel2 inner loops'], 'reason': 'Introduced row_ptr base pointer and unrolled strided access to maintain coalescing and better utilize HBM3 bandwidth per H100 guidance; addresses Roofline advisory about DRAM sector utilization and stalls at lines 28-31, 34-36.'},
+  {'lines': ['accuracy_kernel and accuracy_kernel2 synchronization structure'], 'reason': 'Restructured per-iteration barriers to exactly two syncs per row: start-of-iteration barrier and post-broadcast barrier; avoids unnecessary sync after reduction while ensuring correctness, reducing stall_membar_ratio and stall_wait_ratio (PC SUMMARY lines 38, 43, 151, 270).'},
+  {'lines': ['accuracy_kernel and accuracy_kernel2 reductions and atomicAdd'], 'reason': 'Only thread 0 checks reduced ngt and increments count, and atomicAdd only if count>0, preventing useless work and reducing stall_no_inst_ratio and stall_branch_resolving_ratio at lines 36, 40, 41.'}
+]
+suggested_but_not_applied list = [
+  {'lines': ['accuracy_kernel, accuracy_kernel2'], 'reason': 'Early-exit when partial block sums exceed top_k to skip remaining loads. Not applied due to complexity of providing a correct upper-bound across threads without adding significant divergence; would risk breaking invariants or adding sync overhead.'},
+  {'lines': ['main kernel launches'], 'reason': 'Tune grid size to min(nrows, SM_count * blocks_per_SM_target) using cudaOccupancyMaxActiveBlocksPerMultiprocessor to avoid load imbalance noted in Roofline. Not applied to keep launch structure unchanged and compatible with test harness.'},
+  {'lines': ['accuracy_kernel, accuracy_kernel2'], 'reason': 'Use cuda::memcpy_async (cp.async) to stage tiles of Xdata rows into shared memory with double buffering on H100. Not applied because typical D can be large, making shared memory tiling complex and possibly exceeding shared memory, and current access is already coalesced.'}
+]

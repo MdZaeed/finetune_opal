@@ -1,0 +1,27 @@
+{
+  "dataset_path": "data/finetune/opal_local_sft_small.jsonl",
+  "record_count": 20,
+  "groups": {
+    "accuracy-codex-gpt5": 8,
+    "adjacent-codex-gpt5": 3,
+    "sobol-codex-gpt5": 7,
+    "shmembench-codex-gpt5": 2
+  },
+  "format": "jsonl",
+  "schema": {
+    "id": "string",
+    "group": "string",
+    "source_prompt": "path",
+    "source_response": "path",
+    "messages": [
+      {
+        "role": "user",
+        "content": "prompt text"
+      },
+      {
+        "role": "assistant",
+        "content": "model response text"
+      }
+    ]
+  }
+}

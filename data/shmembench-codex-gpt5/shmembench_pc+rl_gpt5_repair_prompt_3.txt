@@ -1,0 +1,361 @@
+After requesting for optimized code from you, I have gotten the following code:
+# Begin optimized Code
+```cpp```
+#include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
+#include <cmath>
+#include <chrono>
+
+#ifndef BLOCK_SIZE
+#define BLOCK_SIZE 256
+#endif
+
+#ifndef TOTAL_ITERATIONS
+#define TOTAL_ITERATIONS 1024
+#endif
+
+#define CUDA_CHECK(call)                                                        \
+  do {                                                                          \
+    cudaError_t err__ = (call);                                                 \
+    if (err__ != cudaSuccess) {                                                 \
+      std::fprintf(stderr, "CUDA error %s at %s:%d\n",                          \
+                   cudaGetErrorString(err__), __FILE__, __LINE__);              \
+      std::exit(EXIT_FAILURE);                                                  \
+    }                                                                           \
+  } while (0)
+
+__device__ __forceinline__ void shmem_swap(float4* __restrict__ v1,
+                                           float4* __restrict__ v2) {
+  float4 tmp = *v2;
+  *v2 = *v1;
+  *v1 = tmp;
+}
+
+__device__ __forceinline__ float4 init_val(int i) {
+  return make_float4((float)i, (float)(i + 11), (float)(i + 19), (float)(i + 23));
+}
+
+__device__ __forceinline__ float4 reduce_vector(const float4& v1, const float4& v2,
+                                                const float4& v3, const float4& v4,
+                                                const float4& v5, const float4& v6) {
+  return make_float4(v1.x + v2.x + v3.x + v4.x + v5.x + v6.x,
+                     v1.y + v2.y + v3.y + v4.y + v5.y + v6.y,
+                     v1.z + v2.z + v3.z + v4.z + v5.z + v6.z,
+                     v1.w + v2.w + v3.w + v4.w + v5.w + v6.w);
+}
+
+__device__ __forceinline__ void set_vector(float4* __restrict__ target, int offset, float4 v) {
+  target[offset] = v;
+}
+
+__global__ void benchmark_shmem(float4* __restrict__ g_data, int n_outputs) {
+  __shared__ float4 shm_buffer[BLOCK_SIZE * 6];
+
+  const int tid = threadIdx.x;
+  const int globaltid = blockIdx.x * blockDim.x + tid;
+
+  // Initialize per-thread 6x float4 segment in shared memory
+  set_vector(shm_buffer, tid + 0 * blockDim.x, init_val(tid));
+  set_vector(shm_buffer, tid + 1 * blockDim.x, init_val(tid + 1));
+  set_vector(shm_buffer, tid + 2 * blockDim.x, init_val(tid + 3));
+  set_vector(shm_buffer, tid + 3 * blockDim.x, init_val(tid + 7));
+  set_vector(shm_buffer, tid + 4 * blockDim.x, init_val(tid + 13));
+  set_vector(shm_buffer, tid + 5 * blockDim.x, init_val(tid + 17));
+
+  __syncthreads();
+
+  #pragma unroll 32
+  for (int j = 0; j < TOTAL_ITERATIONS; ++j) {
+    // 3 pairwise swaps
+    shmem_swap(shm_buffer + tid + 0 * blockDim.x, shm_buffer + tid + 1 * blockDim.x);
+    shmem_swap(shm_buffer + tid + 2 * blockDim.x, shm_buffer + tid + 3 * blockDim.x);
+    shmem_swap(shm_buffer + tid + 4 * blockDim.x, shm_buffer + tid + 5 * blockDim.x);
+
+    __syncthreads();
+
+    // 2 pairwise swaps
+    shmem_swap(shm_buffer + tid + 1 * blockDim.x, shm_buffer + tid + 2 * blockDim.x);
+    shmem_swap(shm_buffer + tid + 3 * blockDim.x, shm_buffer + tid + 4 * blockDim.x);
+
+    __syncthreads();
+  }
+
+  if (globaltid < n_outputs) {
+    g_data[globaltid] = reduce_vector(shm_buffer[tid + 0 * blockDim.x],
+                                      shm_buffer[tid + 1 * blockDim.x],
+                                      shm_buffer[tid + 2 * blockDim.x],
+                                      shm_buffer[tid + 3 * blockDim.x],
+                                      shm_buffer[tid + 4 * blockDim.x],
+                                      shm_buffer[tid + 5 * blockDim.x]);
+  }
+}
+
+static inline float4 host_init_val(int i) {
+  float4 v;
+  v.x = (float)i;
+  v.y = (float)(i + 11);
+  v.z = (float)(i + 19);
+  v.w = (float)(i + 23);
+  return v;
+}
+
+static inline float4 host_reduce_vector(const float4& v1, const float4& v2,
+                                        const float4& v3, const float4& v4,
+                                        const float4& v5, const float4& v6) {
+  float4 r;
+  r.x = v1.x + v2.x + v3.x + v4.x + v5.x + v6.x;
+  r.y = v1.y + v2.y + v3.y + v4.y + v5.y + v6.y;
+  r.z = v1.z + v2.z + v3.z + v4.z + v5.z + v6.z;
+  r.w = v1.w + v2.w + v3.w + v4.w + v5.w + v6.w;
+  return r;
+}
+
+static inline void expected_checksum(long long n_outputs, double sum_expected[4]) {
+  // The sequence of swaps only permutes the values; the component-wise sum remains invariant.
+  // So we can compute the expected per-thread reduce directly from initial values.
+  long double sx = 0.0L, sy = 0.0L, sz = 0.0L, sw = 0.0L;
+  for (long long tid = 0; tid < n_outputs; ++tid) {
+    float4 r = host_reduce_vector(
+        host_init_val((int)tid),
+        host_init_val((int)(tid + 1)),
+        host_init_val((int)(tid + 3)),
+        host_init_val((int)(tid + 7)),
+        host_init_val((int)(tid + 13)),
+        host_init_val((int)(tid + 17)));
+    sx += r.x; sy += r.y; sz += r.z; sw += r.w;
+  }
+  sum_expected[0] = (double)sx;
+  sum_expected[1] = (double)sy;
+  sum_expected[2] = (double)sz;
+  sum_expected[3] = (double)sw;
+}
+
+int main(int argc, char** argv) {
+  // n_outputs: number of threads (and float4s) to produce
+  long long n_outputs = (1LL << 20); // default: 1,048,576 float4 results (~16 MB)
+  int repeat = 100;
+
+  if (argc >= 2) n_outputs = std::atoll(argv[1]);
+  if (argc >= 3) repeat    = std::atoi(argv[2]);
+  if (n_outputs <= 0 || repeat <= 0) {
+    std::fprintf(stderr, "Usage: %s [n_outputs>=1] [repeat>=1]\n", argv[0]);
+    return EXIT_FAILURE;
+  }
+
+  // Ensure BLOCK_SIZE shared memory footprint is as expected
+  if (BLOCK_SIZE <= 0 || BLOCK_SIZE % 32 != 0) {
+    std::fprintf(stderr, "BLOCK_SIZE must be a positive multiple of 32\n");
+    return EXIT_FAILURE;
+  }
+
+  // Grid configuration
+  const int threads_per_block = BLOCK_SIZE;
+  const int blocks = (int)((n_outputs + threads_per_block - 1) / threads_per_block);
+  const long long total_threads = (long long)blocks * threads_per_block;
+
+  // Allocate device and host buffers
+  float4* d_out = nullptr;
+  CUDA_CHECK(cudaMalloc((void**)&d_out, total_threads * sizeof(float4)));
+
+  // Warm-up kernel
+  benchmark_shmem<<<blocks, threads_per_block>>>(d_out, (int)n_outputs);
+  CUDA_CHECK(cudaPeekAtLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+  // Time with CUDA events for accuracy
+  cudaEvent_t start, stop;
+  CUDA_CHECK(cudaEventCreate(&start));
+  CUDA_CHECK(cudaEventCreate(&stop));
+
+  CUDA_CHECK(cudaEventRecord(start));
+  for (int i = 0; i < repeat; ++i) {
+    benchmark_shmem<<<blocks, threads_per_block>>>(d_out, (int)n_outputs);
+  }
+  CUDA_CHECK(cudaEventRecord(stop));
+  CUDA_CHECK(cudaEventSynchronize(stop));
+
+  float elapsed_ms_total = 0.0f;
+  CUDA_CHECK(cudaEventElapsedTime(&elapsed_ms_total, start, stop));
+  const double avg_ms = elapsed_ms_total / (double)repeat;
+
+  CUDA_CHECK(cudaEventDestroy(start));
+  CUDA_CHECK(cudaEventDestroy(stop));
+
+  // Copy back result (only the first n_outputs are valid)
+  std::vector<float4> h_out((size_t)n_outputs);
+  CUDA_CHECK(cudaMemcpy(h_out.data(), d_out, n_outputs * sizeof(float4), cudaMemcpyDeviceToHost));
+
+  CUDA_CHECK(cudaFree(d_out));
+
+  // Compute checksum on host
+  double sum_host[4] = {0.0, 0.0, 0.0, 0.0};
+  for (long long i = 0; i < n_outputs; ++i) {
+    sum_host[0] += (double)h_out[(size_t)i].x;
+    sum_host[1] += (double)h_out[(size_t)i].y;
+    sum_host[2] += (double)h_out[(size_t)i].z;
+    sum_host[3] += (double)h_out[(size_t)i].w;
+  }
+
+  double sum_expected[4];
+  expected_checksum(n_outputs, sum_expected);
+
+  double max_abs_err = 0.0;
+  for (int k = 0; k < 4; ++k) {
+    double err = std::fabs(sum_host[k] - sum_expected[k]);
+    if (err > max_abs_err) max_abs_err = err;
+  }
+
+  if (max_abs_err > 1e-2) {
+    std::fprintf(stderr, "Checksum failed. Max abs error = %.6e\n", max_abs_err);
+  } else {
+    std::printf("Checksum OK. Max abs error = %.6e\n", max_abs_err);
+  }
+
+  // Shared memory throughput estimation
+  // Per-thread 32-bit operations:
+  //   - 6 stores (initialization)
+  //   - For each iteration: 5 swaps, each swap ≈ 4 x 128-bit ops = 16 x 32-bit ops
+  //     hence 5 * 16 = 80 x 32-bit ops per iteration
+  //   - 6 loads (final reduction)
+  // We keep the original accounting (6 + 4*5*ITER + 6) as 32-bit words:
+  const long long ops_32bit_per_thread = (6LL + 4LL * 5LL * TOTAL_ITERATIONS + 6LL);
+  const long long ops_32bit_total = ops_32bit_per_thread * n_outputs;
+  const long long bytes_total = ops_32bit_total * sizeof(float);
+  const double seconds = avg_ms * 1e-3;
+  const double gb_per_s = (double)bytes_total / seconds / 1e9;
+  const double ops_128bit_per_s = ((double)ops_32bit_total / 4.0) / seconds / 1e9;
+
+  std::printf("Average kernel execution time: %.6f ms\n", avg_ms);
+  std::printf("Shared memory throughput:\n");
+  std::printf("  %.2f GB/s (%.2f billion 128-bit accesses/sec)\n", gb_per_s, ops_128bit_per_s);
+  std::printf("Configuration: BLOCK_SIZE=%d, TOTAL_ITERATIONS=%d, outputs=%lld, blocks=%d\n",
+              BLOCK_SIZE, TOTAL_ITERATIONS, n_outputs, blocks);
+
+  return 0;
+}
+```cpp```
+# End optimized Code
+While building we get the following build errors: tmpxft_000d5568_00000000-6_main.cudafe1.cpp:(.text.startup+0x80): undefined reference to `shmembenchGPU(double*, long, int)'
+collect2: error: ld returned 1 exit status
+make: *** [Makefile:48: main] Error 1
+
+Below is added the original source code.
+# Begin Source Code
+```cpp```
+1:
+6:
+7: #include <chrono>
+8: #include <stdio.h>
+9:
+10: using namespace std::chrono;
+11:
+12: #define TOTAL_ITERATIONS (1024)
+13: #define BLOCK_SIZE 256
+14:
+15:
+16: __device__ void shmem_swap(float4 *v1, float4 *v2){
+17:   float4 tmp;
+18:   tmp = *v2;
+19:   *v2 = *v1;
+20:   *v1 = tmp;
+21: }
+22:
+23: __device__ float4 init_val(int i){
+24:   return make_float4(i, i+11, i+19, i+23);
+25: }
+26:
+27: __device__ float4 reduce_vector(float4 v1, float4 v2, float4 v3, float4 v4, float4 v5, float4 v6){
+28:   return make_float4(v1.x + v2.x + v3.x + v4.x + v5.x + v6.x,
+29:                      v1.y + v2.y + v3.y + v4.y + v5.y + v6.y,
+30:                      v1.z + v2.z + v3.z + v4.z + v5.z + v6.z,
+31:                      v1.w + v2.w + v3.w + v4.w + v5.w + v6.w);
+32: }
+33:
+34: __device__ void set_vector(float4 *target, int offset, float4 v){
+35:   target[offset].x = v.x;
+36:   target[offset].y = v.y;
+37:   target[offset].z = v.z;
+38:   target[offset].w = v.w;
+39: }
+40:
+41:
+42: __global__ void benchmark_shmem(float4 *g_data){
+43:
+44:   __shared__ float4 shm_buffer[BLOCK_SIZE*6];
+45:
+46:   int tid = threadIdx.x;
+47:   int globaltid = blockIdx.x*blockDim.x + tid;
+48:   set_vector(shm_buffer, tid+0*blockDim.x, init_val(tid));
+49:   set_vector(shm_buffer, tid+1*blockDim.x, init_val(tid+1));
+50:   set_vector(shm_buffer, tid+2*blockDim.x, init_val(tid+3));
+51:   set_vector(shm_buffer, tid+3*blockDim.x, init_val(tid+7));
+52:   set_vector(shm_buffer, tid+4*blockDim.x, init_val(tid+13));
+53:   set_vector(shm_buffer, tid+5*blockDim.x, init_val(tid+17));
+54:
+55:   __syncthreads();
+56:
+57:   #pragma unroll 32
+58:   for(int j=0; j<TOTAL_ITERATIONS; j++){
+59:     shmem_swap(shm_buffer+tid+0*blockDim.x, shm_buffer+tid+1*blockDim.x);
+60:     shmem_swap(shm_buffer+tid+2*blockDim.x, shm_buffer+tid+3*blockDim.x);
+61:     shmem_swap(shm_buffer+tid+4*blockDim.x, shm_buffer+tid+5*blockDim.x);
+62:
+63:     __syncthreads();
+64:
+65:     shmem_swap(shm_buffer+tid+1*blockDim.x, shm_buffer+tid+2*blockDim.x);
+66:     shmem_swap(shm_buffer+tid+3*blockDim.x, shm_buffer+tid+4*blockDim.x);
+67:
+68:     __syncthreads();
+69:   }
+70:
+71:   g_data[globaltid] = reduce_vector(shm_buffer[tid+0*blockDim.x],
+72:                                     shm_buffer[tid+1*blockDim.x],
+73:                                     shm_buffer[tid+2*blockDim.x],
+74:                                     shm_buffer[tid+3*blockDim.x],
+75:                                     shm_buffer[tid+4*blockDim.x],
+76:                                     shm_buffer[tid+5*blockDim.x]);
+77: }
+78:
+79: void shmembenchGPU(double *c, const long size, const int repeat) {
+80:   const int TOTAL_BLOCKS = size/(BLOCK_SIZE);
+81:
+82:   double *cd;
+83:   cudaMalloc((void**)&cd, size*sizeof(double));
+84:
+85:   dim3 dimBlock(BLOCK_SIZE, 1, 1);
+86:   dim3 dimGrid_f4(TOTAL_BLOCKS/4, 1, 1);
+87:
+88:   auto start = high_resolution_clock::now();
+89:
+90:   for (int i = 0; i < repeat; i++)
+91:     benchmark_shmem<<< dimGrid_f4, dimBlock >>>((float4*)cd);
+92:
+93:   cudaDeviceSynchronize();
+94:   auto end = high_resolution_clock::now();
+95:   auto time_shmem_128b = duration_cast<nanoseconds>(end - start).count() / (double)repeat;
+96:   printf("Average kernel execution time : %f (ms)\n", time_shmem_128b * 1e-6);
+97:
+98:
+99:   cudaMemcpy(c, cd, size*sizeof(double), cudaMemcpyDeviceToHost);
+100:   cudaFree(cd);
+101:
+102:
+103:   double sum = 0;
+104:   for (long i = 0; i < size; i++) sum += c[i];
+105:   if (sum != 21256458760384741137729978368.00)
+106:     printf("checksum failed\n");
+107:
+108:   printf("Memory throughput\n");
+109:   const long long operations_bytes  = (6LL+4*5*TOTAL_ITERATIONS+6)*size*sizeof(float);
+110:   const long long operations_128bit = (6LL+4*5*TOTAL_ITERATIONS+6)*size/4;
+111:
+112:   printf("\tusing 128bit operations : %8.2f GB/sec (%6.2f billion accesses/sec)\n",
+113:     (double)operations_bytes / time_shmem_128b,
+114:     (double)operations_128bit / time_shmem_128b);
+115: }
+```cpp```
+# End Source Code
+# Instructions
+Can you give me the fixed optimized code that will replace the full source code including headers and main function body?

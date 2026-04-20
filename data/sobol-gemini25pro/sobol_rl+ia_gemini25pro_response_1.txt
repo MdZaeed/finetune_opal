@@ -1,0 +1,171 @@
+```cpp
+#include "sobol.h"
+#include "sobol_gpu.h"
+
+#define k_2powneg32 2.3283064E-10F
+
+// Preconditions:
+// - n_vectors > 0, n_dimensions > 0.
+// - d_directions points to valid device memory containing at least n_dimensions * min(n_directions, 32) unsigned integers.
+//   Specifically, for each blockIdx.y, d_directions[blockIdx.y * n_directions + k] must be valid for k in [0, min(n_directions, 32)-1].
+// - d_output points to valid device memory of size n_vectors * n_dimensions floats.
+// - blockDim.x (threadsperblock) is a power of 2.
+// - gridDim.x is a power of 2.
+// - n_directions is the number of direction vectors available for a single dimension.
+// Postconditions:
+// - d_output contains the generated Sobol sequence values. Specifically,
+//   d_output[blockIdx.y * n_vectors + i] will contain the i-th Sobol value for the blockIdx.y-th dimension.
+__global__
+void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+                     unsigned *__restrict__ d_directions,
+                     float *__restrict__ d_output)
+{
+    // Invariant: The 'v' array stores the first min(n_directions, 32) direction vectors for the current dimension (blockIdx.y).
+    // This is a static shared memory allocation, assuming the Sobol algorithm uses at most 32 direction vectors per dimension.
+    __shared__ unsigned int v[32];
+
+    // Offset pointers for the current dimension (blockIdx.y)
+    // d_directions is a 2D array where the second dimension has size n_directions.
+    // So, d_directions += n_directions * blockIdx.y is correct for accessing the start of the current dimension's vectors.
+    d_directions += n_directions * blockIdx.y;
+    d_output += n_vectors * blockIdx.y;
+
+    // Load direction vectors into shared memory.
+    // Invariant: After this block, v[k] contains d_directions[k] for k < min(n_directions, 32).
+    unsigned int num_v_to_load = min(n_directions, 32u); // Load only up to 32 elements or n_directions if smaller.
+    if (threadIdx.x < num_v_to_load)
+    {
+        v[threadIdx.x] = d_directions[threadIdx.x];
+    }
+    __syncthreads();
+
+    int i0     = threadIdx.x + blockIdx.x * blockDim.x;
+    int stride = gridDim.x * blockDim.x;
+
+    // Hoisted constant: log2(stride)
+    // Invariant: log2_stride_val holds the value of __ffs(stride) - 1, which is log2(stride) since stride is a power of 2.
+    unsigned int log2_stride_val = __ffs(stride) - 1;
+
+    unsigned int g = i0 ^ (i0 >> 1); // Initial Gray code for i0
+
+    unsigned int X = 0;
+    unsigned int mask;
+
+    // Loop Invariant: At the beginning of each iteration k (0 <= k < log2_stride_val):
+    // - X holds the XOR sum of v[j] for all j < k where the j-th bit of the initial g (for i0) was set.
+    // - g holds the initial g (for i0) right-shifted k times.
+    for (unsigned int k = 0 ; k < log2_stride_val ; k++)
+    {
+        mask = - (g & 1);
+        X ^= mask & v[k];
+        g = g >> 1;
+    }
+
+    if (i0 < n_vectors)
+    {
+        d_output[i0] = (float)X * k_2powneg32;
+    }
+
+    // Hoisted constant: v_log2stridem1
+    // Invariant: v_log2stridem1 holds the direction vector at index log2_stride_val - 1.
+    unsigned int v_log2stridem1 = v[log2_stride_val - 1];
+    unsigned int v_stridemask = stride - 1;
+
+    // Loop Invariant: At the beginning of each iteration i (where i = i0 + m * stride for some m >= 1):
+    // - X holds the Sobol value for (i - stride).
+    // - i is the current index for which the Sobol value X is to be calculated.
+    for (unsigned int i = i0 + stride ; i < n_vectors ; i += stride)
+    {
+        // This update rule is specific to Sobol sequence generation using Gray codes and direction vectors.
+        // It calculates X_i = X_{i-stride} XOR V_{c_i} where c_i is derived from the bit pattern of i.
+        X ^= v_log2stridem1 ^ v[__ffs(~((i - stride) | v_stridemask)) - 1];
+        d_output[i] = (float)X * k_2powneg32;
+    }
+}
+
+double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+                unsigned int *d_directions, float *d_output)
+{
+    const int threadsperblock = 64;
+
+    dim3 dimGrid;
+    dim3 dimBlock;
+
+    dimGrid.y = n_dimensions;
+
+    if (n_dimensions < (4 * 24))
+    {
+        dimGrid.x = 4 * 24;
+    }
+    else
+    {
+        dimGrid.x = 1;
+    }
+
+    if (dimGrid.x > (unsigned int)(n_vectors / threadsperblock))
+    {
+        dimGrid.x = (n_vectors + threadsperblock - 1) / threadsperblock;
+    }
+
+    unsigned int targetDimGridX = dimGrid.x;
+    for (dimGrid.x = 1 ; dimGrid.x < targetDimGridX ; dimGrid.x *= 2);
+
+    dimBlock.x = threadsperblock;
+
+    cudaDeviceSynchronize();
+    auto start = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < repeat; i++)
+      sobolGPU_kernel <<<dimGrid, dimBlock>>> (
+        n_vectors, n_dimensions, d_directions, d_output);
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    return time;
+}
+```
+```json
+[
+  {
+    "lines": [
+      47
+    ],
+    "reason": "The shared memory array `v` was declared with a runtime-dependent size `n_directions`, which is invalid for static shared memory and would require dynamic shared memory. More importantly, the kernel logic (specifically the `__ffs` calls for indexing `v`) only accesses indices up to 31. By fixing the size to `32`, we ensure correctness, significantly reduce shared memory usage if `n_directions > 32`, and potentially improve occupancy and reduce MIO scoreboard stalls by making shared memory access more efficient."
+  },
+  {
+    "lines": [
+      58,
+      59,
+      60
+    ],
+    "reason": "Modified the shared memory loading loop to only load `min(n_directions, 32u)` elements. This ensures that threads do not attempt to read beyond the bounds of the now fixed-size `v[32]` array and only load the necessary direction vectors from global memory, reducing redundant global memory traffic if `n_directions` is large but only a subset is used by the kernel logic."
+  },
+  {
+    "lines": [
+      72,
+      83,
+      123
+    ],
+    "reason": "The expression `__ffs(stride) - 1` (and `__ffs(stride) - 2`) is a constant for all threads within a block. Hoisting this calculation to a local variable `log2_stride_val` outside the loops reduces redundant computation, potentially improving instruction issue rate and reducing stalls associated with special math instructions like `__ffs`."
+  }
+]
+```
+```json
+[
+  {
+    "lines": [
+      96,
+      135
+    ],
+    "reason": "The roofline analysis suggested that the kernel executes non-fused FP32 instructions and that fusing them could increase performance. However, the FP32 operations `(float)X * k_2powneg32` are single multiplications. There are no immediately obvious pairs of FP32 operations (e.g., a multiply and an add) that could be fused into an FMA (Fused Multiply-Add) instruction without altering the algorithm's numerical behavior or introducing additional operations. This suggestion might be a general one from the profiler not directly applicable to this specific FP32 pattern."
+  },
+  {
+    "lines": [
+      83,
+      126
+    ],
+    "reason": "Loop unrolling for the first `for` loop (lines 83-92) was considered because it has a small, fixed number of iterations (up to `log2(stride)`, max ~12). While unrolling can reduce loop overhead, it might increase register pressure and code size. Given the MIO scoreboard stalls and low occupancy, the primary bottlenecks are likely memory access patterns and instruction dependencies rather than loop overhead. Unrolling was not applied to avoid potentially increasing register pressure which could further reduce occupancy, and to keep the code cleaner without a clear performance benefit in this context."
+  }
+]
+```

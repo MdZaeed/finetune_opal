@@ -1,0 +1,1 @@
+Error contacting ChatGPT: max_completion_tokens: empty content returned by OpenAI response object (debug: /home/users/tz2201/opal_new/opal/src/results/sw4lite-codex-gpt5/sw4lite_ia_gpt5_empty_response_debug_max_completion_tokens.txt) | max_tokens: Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.

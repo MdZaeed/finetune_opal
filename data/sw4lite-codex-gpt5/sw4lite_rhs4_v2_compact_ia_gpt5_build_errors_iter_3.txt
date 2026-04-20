@@ -1,0 +1,5 @@
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(10147): error: identifier "ro" is undefined
+/storage/users/tz2201/benchmarks/optimized_sw4lite/gpt/optimized_co+ia/src/device-routines.C(10175): error: identifier "ro" is undefined
+make[2]: *** [CMakeFiles/sw4lite.dir/build.make:245: CMakeFiles/sw4lite.dir/src/device-routines.C.o] Error 2
+make[1]: *** [CMakeFiles/Makefile2:87: CMakeFiles/sw4lite.dir/all] Error 2
+make: *** [Makefile:91: all] Error 2

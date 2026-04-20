@@ -1,0 +1,47 @@
+```
+__global__ void dpdmt_dev( int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+                           float_sw4* up, float_sw4* u, float_sw4* um,
+                           float_sw4* u2, float_sw4 dt2i, int ghost_points )
+{
+    size_t myi = threadIdx.x + blockIdx.x * blockDim.x;
+    const size_t nthreads = static_cast<size_t>(gridDim.x) * blockDim.x;
+    const size_t npts = static_cast<size_t>((ilast - ifirst + 1)) * (jlast - jfirst + 1) * (klast - kfirst + 1);
+    const size_t n3 = 3 * npts;
+
+    const float_sw4* __restrict__ cup = up;
+    const float_sw4* __restrict__ cu  = u;
+    const float_sw4* __restrict__ cum = um;
+    float_sw4* __restrict__ cu2 = u2;
+    const float_sw4 dt2i_loc = dt2i;
+
+    for (size_t i = myi; i < n3; i += nthreads * 4)
+    {
+        size_t i0 = i;
+        size_t i1 = i0 + nthreads;
+        size_t i2 = i1 + nthreads;
+        size_t i3 = i2 + nthreads;
+
+        float_sw4 r0 = dt2i_loc * (__ldg(&cup[i0]) - static_cast<float_sw4>(2) * __ldg(&cu[i0]) + __ldg(&cum[i0]));
+        cu2[i0] = r0;
+
+        if (i1 < n3)
+        {
+            float_sw4 r1 = dt2i_loc * (__ldg(&cup[i1]) - static_cast<float_sw4>(2) * __ldg(&cu[i1]) + __ldg(&cum[i1]));
+            cu2[i1] = r1;
+        }
+        if (i2 < n3)
+        {
+            float_sw4 r2 = dt2i_loc * (__ldg(&cup[i2]) - static_cast<float_sw4>(2) * __ldg(&cu[i2]) + __ldg(&cum[i2]));
+            cu2[i2] = r2;
+        }
+        if (i3 < n3)
+        {
+            float_sw4 r3 = dt2i_loc * (__ldg(&cup[i3]) - static_cast<float_sw4>(2) * __ldg(&cu[i3]) + __ldg(&cum[i3]));
+            cu2[i3] = r3;
+        }
+    }
+}
+```
+optimizations list = [{'lines': [5, 6, 7, 8], 'reason': 'Kept 64-bit indexing but added n3 to avoid recomputing 3*npts each iteration.'}, {'lines': [10, 11, 12, 13, 14], 'reason': 'Added __restrict__ read-only aliases and a local copy of dt2i to reduce aliasing and promote register caching; enables use of __ldg for better L2/read-only cache behavior on Hopper.'}, {'lines': [16, 39], 'reason': 'Manually unrolled the grid-stride loop by a factor of 4 to increase ILP and better utilize memory pipelines on small workloads as indicated by under-utilized pipelines.'}, {'lines': [23, 27, 32, 37], 'reason': 'Used __ldg() on read-only inputs to leverage read-only caching paths and reduce latency; also cast the constant 2 to float_sw4 to avoid integer promotions and improve FMA-friendly codegen.'}]
+
+suggested_but_not_applied list = [{'lines': [1], 'reason': 'Add __launch_bounds__ to the kernel to tune occupancy specifically for the chosen block size; not applied to avoid changing the function declaration per guardrails.'}, {'lines': [16], 'reason': 'Use cp.async/cuda::memcpy_async with shared-memory staging and double buffering to hide global-memory latency; not applied due to constraint against increasing shared-memory footprint or adding new shared buffers.'}, {'lines': [1], 'reason': 'Change kernel launch configuration (larger blocks / more blocks) to increase active warps per SM; not applied because host launch code is not provided and must not be altered.'}, {'lines': [16], 'reason': 'Wider vectorized loads/stores (float2/float4) for higher bandwidth utilization; not applied because alignment guarantees are unknown and changing data access width risks misaligned accesses.'}]

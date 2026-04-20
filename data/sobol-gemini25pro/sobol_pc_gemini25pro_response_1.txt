@@ -1,0 +1,180 @@
+```cpp
+#include "sobol.h"
+#include "sobol_gpu.h"
+#include <chrono> // Added for std::chrono
+
+#define k_2powneg32 2.3283064E-10F
+
+// Preconditions:
+// - n_vectors > 0
+// - n_dimensions > 0
+// - d_directions points to valid device memory containing n_dimensions * gridDim.y unsigned integers.
+// - d_output points to valid device memory of size n_vectors * gridDim.y floats.
+// - d_directions contains the direction vectors for Sobol sequence generation.
+// - The kernel must be launched with n_dimensions * sizeof(unsigned int) bytes of dynamic shared memory.
+// - stride (calculated as gridDim.x * blockDim.x) must be a power of 2.
+//
+// Postconditions:
+// - d_output will contain n_vectors * gridDim.y Sobol quasi-random numbers, where each n_vectors block
+//   corresponds to a different dimension (or batch, as implied by blockIdx.y).
+// - The values in d_output will be in the range [0.0, 1.0).
+__global__
+void sobolGPU_kernel(unsigned n_vectors, unsigned n_dimensions,
+                     unsigned *__restrict__ d_directions,
+                     float *__restrict__ d_output)
+{
+    // Dynamic shared memory for direction vectors 'v'
+    extern __shared__ unsigned int v[];
+
+    // Offset pointers based on blockIdx.y for multi-dimensional processing
+    d_directions += n_dimensions * blockIdx.y;
+    d_output += n_vectors * blockIdx.y;
+
+    // Load direction vectors into shared memory
+    // Loop Invariant: At the start of each iteration, v[0...threadIdx.x-1] are loaded.
+    // Proof: Base case (threadIdx.x=0): no elements loaded, invariant holds.
+    // Inductive step: Assume v[0...k-1] are loaded. If threadIdx.x=k, v[k] is loaded.
+    // This maintains the invariant for k+1.
+    if (threadIdx.x < n_dimensions)
+    {
+        v[threadIdx.x] = d_directions[threadIdx.x];
+    }
+    __syncthreads(); // Ensure all direction vectors are loaded before any thread uses them
+
+    // Calculate global thread index and stride
+    int i0     = threadIdx.x + blockIdx.x * blockDim.x;
+    int stride = gridDim.x * blockDim.x;
+
+    // Calculate initial Gray code for i0
+    unsigned int g = i0 ^ (i0 >> 1);
+
+    unsigned int X = 0;
+    unsigned int mask;
+
+    // Calculate initial Sobol value for i0
+    // Loop Invariant 1: At the beginning of each iteration k, g holds the value (i0 ^ (i0 >> 1)) >> k.
+    // Loop Invariant 2: At the beginning of each iteration k, X holds the XOR sum of v[j] for all j < k
+    //                   where the j-th bit of (i0 ^ (i0 >> 1)) was 1.
+    // Proof:
+    // Base Case (k=0): g = i0 ^ (i0 >> 1), X = 0. Invariant 1 holds. Invariant 2 holds vacuously.
+    // Inductive Step: Assume Invariants 1 and 2 hold for k.
+    //   Inside the loop: mask = -(g & 1); X ^= mask & v[k]; g = g >> 1;
+    //   g & 1 checks the k-th bit of the original (i0 ^ (i0 >> 1)). If it's 1, mask is 0xFFFFFFFF, otherwise 0.
+    //   X is updated by v[k] if the k-th bit was 1. This maintains Invariant 2 for k+1.
+    //   g is shifted right, so for k+1, it will hold (i0 ^ (i0 >> 1)) >> (k+1). This maintains Invariant 1 for k+1.
+    // Termination: The loop terminates when k = __ffs(stride) - 1. At this point, X contains the correct initial Sobol value for i0.
+    for (unsigned int k = 0 ; k < __ffs(stride) - 1 ; k++)
+    {
+        mask = - (g & 1);
+        X ^= mask & v[k];
+        g = g >> 1;
+    }
+
+    // Store the initial Sobol value if within bounds
+    if (i0 < n_vectors)
+    {
+        d_output[i0] = (float)X * k_2powneg32;
+    }
+
+    // Pre-calculate loop invariants for the main loop
+    unsigned int v_log2stridem1 = v[__ffs(stride) - 2];
+    unsigned int v_stridemask = stride - 1;
+
+    // Main loop to generate subsequent Sobol numbers for this thread
+    // Loop Invariant 1: At the beginning of each iteration, i represents the current index for which the Sobol number
+    //                   is being calculated, and i = i0 + m * stride for some integer m >= 1.
+    // Loop Invariant 2: At the beginning of each iteration, X holds the Sobol value for i - stride.
+    // Loop Invariant 3: v_log2stridem1 holds v[__ffs(stride) - 2] and v_stridemask holds stride - 1.
+    //                   These are constant within the loop.
+    // Proof:
+    // Base Case (first iteration, i = i0 + stride): X holds the Sobol value for i0 (from the previous block).
+    //   Invariant 1 holds with m=1. Invariant 2 holds because X is the value for i0 = (i0 + stride) - stride.
+    //   Invariant 3 holds by definition.
+    // Inductive Step: Assume Invariants 1, 2, and 3 hold for i.
+    //   Inside the loop (unrolled):
+    //   First step: X is updated using the Sobol rule for 'i' based on 'i - stride'.
+    //               d_output[i] is written.
+    //   Second step: If bounds allow, X is updated using the Sobol rule for 'i + stride' based on 'i'.
+    //                d_output[i + stride] is written.
+    //   i is incremented by 2 * stride. Invariant 1 holds for the next iteration.
+    //   X now holds the Sobol value for the current 'i + stride' (which will be 'i - stride' in the next iteration's perspective).
+    //   So Invariant 2 holds for the next iteration.
+    //   Invariant 3 holds as v_log2stridem1 and v_stridemask are loop-invariant.
+    // Termination: The loop terminates when i >= n_vectors. All Sobol numbers for the current thread's i0 sequence
+    //              up to n_vectors - 1 have been calculated and stored.
+    for (unsigned int i = i0 + stride ; i < n_vectors ; i += 2 * stride) // Unrolled by factor 2
+    {
+        // First unrolled iteration: calculates for index 'i'
+        // The previous index was 'i - stride'.
+        unsigned int i_prev1 = i - stride;
+        X ^= v_log2stridem1 ^ v[__ffs(~(i_prev1 | v_stridemask)) - 1];
+        d_output[i] = (float)X * k_2powneg32;
+
+        // Second unrolled iteration: calculates for index 'i + stride'
+        // The previous index was 'i'.
+        if (i + stride < n_vectors)
+        {
+            unsigned int i_current_for_second_step = i; // This is the 'i' that was just processed
+            X ^= v_log2stridem1 ^ v[__ffs(~(i_current_for_second_step | v_stridemask)) - 1];
+            d_output[i + stride] = (float)X * k_2powneg32;
+        }
+    }
+}
+
+double sobolGPU(int repeat, int n_vectors, int n_dimensions,
+                unsigned int *d_directions, float *d_output)
+{
+    const int threadsperblock = 64;
+
+    dim3 dimGrid;
+    dim3 dimBlock;
+
+    dimGrid.y = n_dimensions;
+
+    if (n_dimensions < (4 * 24))
+    {
+        dimGrid.x = 4 * 24;
+    }
+    else
+    {
+        dimGrid.x = 1;
+    }
+
+    if (dimGrid.x > (unsigned int)(n_vectors / threadsperblock))
+    {
+        dimGrid.x = (n_vectors + threadsperblock - 1) / threadsperblock;
+    }
+
+    unsigned int targetDimGridX = dimGrid.x;
+    for (dimGrid.x = 1 ; dimGrid.x < targetDimGridX ; dimGrid.x *= 2); // Ensure dimGrid.x is a power of 2
+
+    dimBlock.x = threadsperblock;
+
+    // Calculate dynamic shared memory size required for 'v' array
+    size_t shmem_size = n_dimensions * sizeof(unsigned int);
+
+    cudaDeviceSynchronize();
+    auto start = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < repeat; i++)
+      sobolGPU_kernel <<<dimGrid, dimBlock, shmem_size>>> ( // Pass shmem_size for dynamic shared memory
+        n_vectors, n_dimensions, d_directions, d_output);
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::steady_clock::now();
+    double time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    return time;
+}
+```
+```
+optimizations = [
+    {'lines': [47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 188, 189], 'reason': 'Changed shared memory allocation for `v` from static to dynamic. The original declaration `__shared__ unsigned int v[n_directions];` is invalid C++ for a variable-sized array in static shared memory. It was replaced with `extern __shared__ unsigned int v[];` and the `sobolGPU` function was updated to pass the required shared memory size (`n_dimensions * sizeof(unsigned int)`) to the kernel launch. This ensures correct memory allocation and resolves potential compilation issues or undefined behavior, addressing `stall_short_sb_ratio`, `stall_wait_ratio`, `stall_long_sb_ratio` related to shared memory access by ensuring proper setup.'},
+    {'lines': [126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136], 'reason': 'Unrolled the main loop (`for (unsigned int i = i0 + stride ; i < n_vectors ; i += stride)`) by a factor of 2. This aims to increase instruction-level parallelism, reduce loop overhead, and potentially hide memory access latency for the shared memory reads and global memory writes. This addresses `stall_wait_ratio` and `stall_short_sb_ratio` observed in the main loop by allowing the GPU to execute more instructions concurrently.'}
+]
+```
+```
+suggested_but_not_applied = [
+    {'lines': [83, 84, 85, 86, 87, 88, 89, 90, 91], 'reason': 'Considered unrolling the initial `for (unsigned int k = 0 ; k < __ffs(stride) - 1 ; k++)` loop. However, this loop runs for a very small number of iterations (up to `log2(stride) - 1`, which is typically less than 15). The potential performance gain from unrolling would be minimal and might increase code size unnecessarily. The `stall_branch_resolving_ratio` on line 249 (`mask = - (g & 1);`) is likely due to instruction dependencies or compiler-generated code rather than a true branch, and unrolling might not resolve it significantly.'},
+    {'lines': [217, 218, 219], 'reason': 'Considered using `cuda::memcpy_async` (or `cp.async`) to load `d_directions` into shared memory `v` to overlap memory transfer with computation. However, `n_dimensions` is typically small (e.g., up to 96 in the provided `sobolGPU` function logic), meaning the shared memory load is relatively quick. The current `if (threadIdx.x < n_dimensions)` followed by `__syncthreads()` is a conventional and efficient pattern for small shared memory loads. Introducing `cp.async` would add complexity (e.g., `cuda::pipeline`, `cuda::barrier`) which is explicitly disallowed by the Gemini compatibility guardrails.'}
+]
+```

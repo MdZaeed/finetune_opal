@@ -1,0 +1,287 @@
+After requesting for optimized code from you, I have gotten the following code:
+# Begin optimized Code
+```cpp```
+#include <cuda_runtime.h>
+#include <device_launch_parameters.h>
+#include <chrono>
+#include <stdio.h>
+#include <stdlib.h>
+
+using namespace std::chrono;
+
+#define TOTAL_ITERATIONS (1024)
+#define BLOCK_SIZE 256
+
+// Preconditions (mathematical):
+// - size is a positive integer representing the number of doubles allocated in cd/c on device/host.
+// - BLOCK_SIZE divides the blockDim.x at launch (enforced via launch configuration).
+// - g_data points to device memory large enough to hold (gridDim.x * blockDim.x) float4 elements.
+// - Shared memory array shm_buffer has size 6*BLOCK_SIZE float4 values, sufficient for per-thread 6-lane storage.
+//
+// Postconditions (mathematical):
+// - For each thread (blockIdx.x, threadIdx.x), the 6 shared-memory lanes {p0..p5} after the loop contain a permutation
+//   of the 6 initial values assigned by init_val for that thread; reduce_vector returns the element-wise sum of those 6 values,
+//   which is written to g_data[globaltid].
+//
+// Loop Invariants (for the for(j) loop below), for each thread tid:
+//   I1: For all k in {0..5}, *pk is always one of the 6 per-thread values initialized at the start for this tid.
+//   I2: The multiset {*p0, *p1, *p2, *p3, *p4, *p5} is a permutation of the 6 initial per-thread values for this tid.
+//   I3: No pk ever aliases any other thread's storage; all pk addresses are of the form &shm_buffer[tid + m*blockDim.x] for fixed tid.
+//
+// Proof of invariant preservation after optimization (removal of __syncthreads and use of 128-bit shared ops):
+// - Base case: Before the loop, we set *pk to distinct initial per-thread values using direct 128-bit stores; thus I1, I2, I3 hold.
+// - Inductive step: Each loop body performs a sequence of pairwise swaps on the same per-thread addresses (p0<->p1, p2<->p3, p4<->p5,
+//   then p1<->p2, p3<->p4). Swaps only permute the 6 values; therefore I1 and I2 are preserved. Since pk addresses are independent of
+//   data and depend only on tid and blockDim.x, I3 is preserved. Because there are no cross-thread reads/writes (each thread only uses
+//   its own pk), removing __syncthreads does not change visibility for the same thread; CUDA memory model guarantees a thread's own
+//   shared-memory writes are immediately visible to itself. Hence, the optimized kernel is semantically equivalent.
+//
+// Performance rationale tied to profiling (ROOFLINE SUMMARY [3], [4]):
+// - We reduced MIO pipeline pressure by converting 4x 32-bit shared stores in set_vector into a single 128-bit shared store and by
+//   eliminating unnecessary __syncthreads barriers, addressing high shared-memory stall cycles (75.8 cycles stalled on MIO, 45.6% share).
+// - Fewer synchronization points and wider shared transactions increase the number of eligible warps per cycle and scheduler issue rate,
+//   addressing the low issue frequency (one instruction every 14.7 cycles) and low eligible warp count (0.35) per [4].
+
+__device__ __forceinline__ void shmem_swap(float4 *v1, float4 *v2){
+  float4 tmp = *v2;
+  *v2 = *v1;
+  *v1 = tmp;
+}
+
+__device__ __forceinline__ float4 init_val(int i){
+  return make_float4(i, i+11, i+19, i+23);
+}
+
+__device__ __forceinline__ float4 reduce_vector(float4 v1, float4 v2, float4 v3, float4 v4, float4 v5, float4 v6){
+  return make_float4(v1.x + v2.x + v3.x + v4.x + v5.x + v6.x,
+                     v1.y + v2.y + v3.y + v4.y + v5.y + v6.y,
+                     v1.z + v2.z + v3.z + v4.z + v5.z + v6.z,
+                     v1.w + v2.w + v3.w + v4.w + v5.w + v6.w);
+}
+
+__device__ __forceinline__ void set_vector(float4 *target, int offset, float4 v){
+  // Optimize to a single 128-bit shared store (was 4 scalar stores)
+  target[offset] = v;
+}
+
+__global__ __launch_bounds__(BLOCK_SIZE)
+void benchmark_shmem(float4 *g_data){
+
+  __shared__ float4 shm_buffer[BLOCK_SIZE*6];
+
+  const int tid       = threadIdx.x;
+  const int globaltid = blockIdx.x*blockDim.x + tid;
+
+  // Precompute per-thread shared-memory pointers (reduces address arithmetic)
+  float4* p0 = &shm_buffer[tid + 0*blockDim.x];
+  float4* p1 = &shm_buffer[tid + 1*blockDim.x];
+  float4* p2 = &shm_buffer[tid + 2*blockDim.x];
+  float4* p3 = &shm_buffer[tid + 3*blockDim.x];
+  float4* p4 = &shm_buffer[tid + 4*blockDim.x];
+  float4* p5 = &shm_buffer[tid + 5*blockDim.x];
+
+  // Initialize per-thread lanes with 128-bit stores
+  *p0 = init_val(tid);
+  *p1 = init_val(tid+1);
+  *p2 = init_val(tid+3);
+  *p3 = init_val(tid+7);
+  *p4 = init_val(tid+13);
+  *p5 = init_val(tid+17);
+
+  // No __syncthreads() needed: all accesses are per-thread, no cross-thread dependencies.
+
+  #pragma unroll 32
+  for(int j=0; j<TOTAL_ITERATIONS; j++){
+    // Pairwise swaps within the same thread's 6 lanes
+    shmem_swap(p0, p1);
+    shmem_swap(p2, p3);
+    shmem_swap(p4, p5);
+
+    // No block-wide dependency exists here; removing __syncthreads() reduces MIO stalls ([3]) and improves issue rate ([4])
+
+    shmem_swap(p1, p2);
+    shmem_swap(p3, p4);
+
+    // No barrier needed for the same reason.
+  }
+
+  g_data[globaltid] = reduce_vector(*p0, *p1, *p2, *p3, *p4, *p5);
+}
+
+void shmembenchGPU(double *c, const long size, const int repeat) {
+  const int TOTAL_BLOCKS = size/(BLOCK_SIZE);
+
+  double *cd;
+  cudaMalloc((void**)&cd, size*sizeof(double));
+
+  dim3 dimBlock(BLOCK_SIZE, 1, 1);
+  dim3 dimGrid_f4(TOTAL_BLOCKS/4, 1, 1);
+
+  auto start = high_resolution_clock::now();
+
+  for (int i = 0; i < repeat; i++)
+    benchmark_shmem<<< dimGrid_f4, dimBlock >>>((float4*)cd);
+
+  cudaDeviceSynchronize();
+  auto end = high_resolution_clock::now();
+  auto time_shmem_128b = duration_cast<nanoseconds>(end - start).count() / (double)repeat;
+  printf("Average kernel execution time : %f (ms)\n", time_shmem_128b * 1e-6);
+
+  cudaMemcpy(c, cd, size*sizeof(double), cudaMemcpyDeviceToHost);
+  cudaFree(cd);
+
+  double sum = 0;
+  for (long i = 0; i < size; i++) sum += c[i];
+  if (sum != 21256458760384741137729978368.00)
+    printf("checksum failed\n");
+
+  printf("Memory throughput\n");
+  const long long operations_bytes  = (6LL+4*5*TOTAL_ITERATIONS+6)*size*sizeof(float);
+  const long long operations_128bit = (6LL+4*5*TOTAL_ITERATIONS+6)*size/4;
+
+  printf("\tusing 128bit operations : %8.2f GB/sec (%6.2f billion accesses/sec)\n",
+    (double)operations_bytes / time_shmem_128b,
+    (double)operations_128bit / time_shmem_128b);
+}
+
+int main(int argc, char** argv) {
+  long size = (1L << 24);   // number of doubles
+  int repeat = 10;
+
+  if (argc > 1) size = atol(argv[1]);
+  if (argc > 2) repeat = atoi(argv[2]);
+
+  double* c = (double*)malloc(size * sizeof(double));
+  if (!c) {
+    fprintf(stderr, "Host allocation failed\n");
+    return 1;
+  }
+
+  shmembenchGPU(c, size, repeat);
+
+  free(c);
+  return 0;
+}
+```cpp```
+# End optimized Code
+While building we get the following build errors: collect2: error: ld returned 1 exit status
+make: *** [Makefile:48: main] Error 1
+
+Below is added the original source code.
+# Begin Source Code
+```cpp```
+1:
+6:
+7: #include <chrono>
+8: #include <stdio.h>
+9:
+10: using namespace std::chrono;
+11:
+12: #define TOTAL_ITERATIONS (1024)
+13: #define BLOCK_SIZE 256
+14:
+15:
+16: __device__ void shmem_swap(float4 *v1, float4 *v2){
+17:   float4 tmp;
+18:   tmp = *v2;
+19:   *v2 = *v1;
+20:   *v1 = tmp;
+21: }
+22:
+23: __device__ float4 init_val(int i){
+24:   return make_float4(i, i+11, i+19, i+23);
+25: }
+26:
+27: __device__ float4 reduce_vector(float4 v1, float4 v2, float4 v3, float4 v4, float4 v5, float4 v6){
+28:   return make_float4(v1.x + v2.x + v3.x + v4.x + v5.x + v6.x,
+29:                      v1.y + v2.y + v3.y + v4.y + v5.y + v6.y,
+30:                      v1.z + v2.z + v3.z + v4.z + v5.z + v6.z,
+31:                      v1.w + v2.w + v3.w + v4.w + v5.w + v6.w);
+32: }
+33:
+34: __device__ void set_vector(float4 *target, int offset, float4 v){
+35:   target[offset].x = v.x;
+36:   target[offset].y = v.y;
+37:   target[offset].z = v.z;
+38:   target[offset].w = v.w;
+39: }
+40:
+41:
+42: __global__ void benchmark_shmem(float4 *g_data){
+43:
+44:   __shared__ float4 shm_buffer[BLOCK_SIZE*6];
+45:
+46:   int tid = threadIdx.x;
+47:   int globaltid = blockIdx.x*blockDim.x + tid;
+48:   set_vector(shm_buffer, tid+0*blockDim.x, init_val(tid));
+49:   set_vector(shm_buffer, tid+1*blockDim.x, init_val(tid+1));
+50:   set_vector(shm_buffer, tid+2*blockDim.x, init_val(tid+3));
+51:   set_vector(shm_buffer, tid+3*blockDim.x, init_val(tid+7));
+52:   set_vector(shm_buffer, tid+4*blockDim.x, init_val(tid+13));
+53:   set_vector(shm_buffer, tid+5*blockDim.x, init_val(tid+17));
+54:
+55:   __syncthreads();
+56:
+57:   #pragma unroll 32
+58:   for(int j=0; j<TOTAL_ITERATIONS; j++){
+59:     shmem_swap(shm_buffer+tid+0*blockDim.x, shm_buffer+tid+1*blockDim.x);
+60:     shmem_swap(shm_buffer+tid+2*blockDim.x, shm_buffer+tid+3*blockDim.x);
+61:     shmem_swap(shm_buffer+tid+4*blockDim.x, shm_buffer+tid+5*blockDim.x);
+62:
+63:     __syncthreads();
+64:
+65:     shmem_swap(shm_buffer+tid+1*blockDim.x, shm_buffer+tid+2*blockDim.x);
+66:     shmem_swap(shm_buffer+tid+3*blockDim.x, shm_buffer+tid+4*blockDim.x);
+67:
+68:     __syncthreads();
+69:   }
+70:
+71:   g_data[globaltid] = reduce_vector(shm_buffer[tid+0*blockDim.x],
+72:                                     shm_buffer[tid+1*blockDim.x],
+73:                                     shm_buffer[tid+2*blockDim.x],
+74:                                     shm_buffer[tid+3*blockDim.x],
+75:                                     shm_buffer[tid+4*blockDim.x],
+76:                                     shm_buffer[tid+5*blockDim.x]);
+77: }
+78:
+79: void shmembenchGPU(double *c, const long size, const int repeat) {
+80:   const int TOTAL_BLOCKS = size/(BLOCK_SIZE);
+81:
+82:   double *cd;
+83:   cudaMalloc((void**)&cd, size*sizeof(double));
+84:
+85:   dim3 dimBlock(BLOCK_SIZE, 1, 1);
+86:   dim3 dimGrid_f4(TOTAL_BLOCKS/4, 1, 1);
+87:
+88:   auto start = high_resolution_clock::now();
+89:
+90:   for (int i = 0; i < repeat; i++)
+91:     benchmark_shmem<<< dimGrid_f4, dimBlock >>>((float4*)cd);
+92:
+93:   cudaDeviceSynchronize();
+94:   auto end = high_resolution_clock::now();
+95:   auto time_shmem_128b = duration_cast<nanoseconds>(end - start).count() / (double)repeat;
+96:   printf("Average kernel execution time : %f (ms)\n", time_shmem_128b * 1e-6);
+97:
+98:
+99:   cudaMemcpy(c, cd, size*sizeof(double), cudaMemcpyDeviceToHost);
+100:   cudaFree(cd);
+101:
+102:
+103:   double sum = 0;
+104:   for (long i = 0; i < size; i++) sum += c[i];
+105:   if (sum != 21256458760384741137729978368.00)
+106:     printf("checksum failed\n");
+107:
+108:   printf("Memory throughput\n");
+109:   const long long operations_bytes  = (6LL+4*5*TOTAL_ITERATIONS+6)*size*sizeof(float);
+110:   const long long operations_128bit = (6LL+4*5*TOTAL_ITERATIONS+6)*size/4;
+111:
+112:   printf("\tusing 128bit operations : %8.2f GB/sec (%6.2f billion accesses/sec)\n",
+113:     (double)operations_bytes / time_shmem_128b,
+114:     (double)operations_128bit / time_shmem_128b);
+115: }
+```cpp```
+# End Source Code
+# Instructions
+Can you give me the fixed optimized code that will replace the full source code including headers and main function body?

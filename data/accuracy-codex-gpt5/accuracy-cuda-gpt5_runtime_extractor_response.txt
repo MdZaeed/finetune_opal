@@ -1,0 +1,78 @@
+```bash
+#!/usr/bin/env bash
+# Extract runtime from a log and print as runtime_ms=<number>
+
+if [ "$#" -ne 1 ]; then
+  echo "Usage: $0 <logfile>" >&2
+  exit 2
+fi
+
+logfile="$1"
+if [ ! -r "$logfile" ]; then
+  echo "Error: cannot read file: $logfile" >&2
+  exit 2
+fi
+
+if output=$(perl -ne '
+  BEGIN {
+    $best_cat = -1;
+    $best_ms = undef;
+  }
+
+  sub cat {
+    my ($l) = @_;
+    my $lc = lc($l);
+    return 2 if $lc =~ /(end[- ]?to[- ]?end|overall|total(?!\s+memory)|elapsed|wall(?:[- ]?clock)?|program|application|full run|complete(?:d)?|finished|whole\s*(?:run|program))/;
+    return 1 if $lc =~ /\b(avg|average|mean)\b/;
+    return 0;
+  }
+
+  sub to_ms {
+    my ($v, $u) = @_;
+    $u = lc($u // "");
+    $u =~ s/[\s()]+//g;
+    return $v+0.0                 if $u =~ /^(ms|msec|millisec|milliseconds?)$/;
+    return $v*1000.0              if $u =~ /^(s|sec|seconds?)$/;
+    return $v/1000.0              if $u =~ /^(us|µs|μs|usec|microsec|microseconds?)$/;
+    return $v/1_000_000.0         if $u =~ /^(ns|nsec|nanosec|nanoseconds?)$/;
+    return undef;
+  }
+
+  while (defined($_)) {
+    my $line = $_;
+
+    next unless $line =~ /(time|runtime|run time|execution time|elapsed|avg|average|mean|end[- ]?to[- ]?end|overall|total|wall)/i;
+
+    my $category = cat($line);
+    my $last_ms;
+
+    while ($line =~ /([0-9]+(?:\.[0-9]+)?)\s*(?:\(?\s*(ns|nsec|nanosec(?:onds?)?|us|µs|μs|usec|microsec(?:onds?)?|ms|msec|millisec(?:onds?)?|s|sec|seconds?)\s*\)?)/ig) {
+      my ($v, $u) = ($1, $2);
+      my $ms = to_ms($v, $u);
+      $last_ms = $ms if defined $ms;
+    }
+
+    if (defined $last_ms) {
+      if ($category > $best_cat || $category == $best_cat) {
+        $best_cat = $category;
+        $best_ms  = $last_ms;
+      }
+    }
+  }
+
+  END {
+    if (defined $best_ms) {
+      my $out = sprintf("%.6f", $best_ms);
+      $out =~ s/0+$//; $out =~ s/\.$//;
+      print "runtime_ms=$out\n";
+    } else {
+      print STDERR "Error: could not find runtime in log\n";
+      exit 1;
+    }
+  }
+' "$logfile"); then
+  printf "%s\n" "$output"
+else
+  exit 1
+fi
+```

@@ -1,0 +1,24 @@
+rm -rf main main.o
+nvcc  -std=c++14 -Xcompiler -Wall -arch=sm_80 -lineinfo -O3 -c main.cu -o main.o
+nvcc  -std=c++14 -Xcompiler -Wall -arch=sm_80 -lineinfo -O3 main.o -o main 
+./main 8192 10000 10 100
+Grid size is 2048
+Average execution time of accuracy kernel: 187.093750 (us)
+PASS
+Average execution time of accuracy kernel2: 186.745544 (us)
+PASS
+Grid size is 4096
+Average execution time of accuracy kernel: 178.965607 (us)
+PASS
+Average execution time of accuracy kernel2: 178.571503 (us)
+PASS
+Grid size is 6144
+Average execution time of accuracy kernel: 177.171616 (us)
+PASS
+Average execution time of accuracy kernel2: 177.358826 (us)
+PASS
+Grid size is 8192
+Average execution time of accuracy kernel: 177.938538 (us)
+PASS
+Average execution time of accuracy kernel2: 177.809128 (us)
+PASS

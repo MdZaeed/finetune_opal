@@ -1,0 +1,127 @@
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+  echo "Error: exactly one argument (path to log file) is required." >&2
+  exit 2
+fi
+
+logfile="$1"
+if [ ! -r "$logfile" ]; then
+  echo "Error: cannot read file: $logfile" >&2
+  exit 2
+fi
+
+ms=$(awk '
+BEGIN {
+  IGNORECASE=1
+  best_p = 0
+  best = -1
+  summary_next = 0
+}
+function update(v, p) {
+  if (p > best_p || p == best_p) { best = v; best_p = p }
+}
+function unit_to_ms(u, defsec, n, ul) {
+  ul = tolower(u)
+  if (ul ~ /^(ms|msec|msecs|millisecond|milliseconds)$/) return n+0
+  else if (ul ~ /^(s|sec|secs|second|seconds)$/) return (n+0)*1000
+  else if (ul ~ /^(us|usec|usecs|microsecond|microseconds)$/) return (n+0)/1000
+  else if (ul ~ /^(ns|nsec|nsecs|nanosecond|nanoseconds)$/) return (n+0)/1000000
+  else if (ul ~ /^(m|min|mins|minute|minutes)$/) return (n+0)*60000
+  else if (ul ~ /^(h|hr|hrs|hour|hours)$/) return (n+0)*3600000
+  else if (defsec) return (n+0)*1000
+  else return -1
+}
+function get_ms_from_line(line, default_seconds,   s,m,n,u,ms,last_ms) {
+  s = line; last_ms = -1
+  # find number + optional unit tokens; keep the last recognized
+  while (match(s, /([0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?) *([[:alpha:]]+)?/, m)) {
+    n = m[1]; u = m[4]
+    ms = unit_to_ms(u, default_seconds, n)
+    if (ms >= 0) last_ms = ms
+    s = substr(s, RSTART + RLENGTH)
+  }
+  if (last_ms < 0 && default_seconds) {
+    s = line
+    while (match(s, /([0-9]+(\.[0-9]+)?)/, m)) {
+      last_ms = (m[1]+0)*1000
+      s = substr(s, RSTART + RLENGTH)
+    }
+  }
+  return last_ms
+}
+{
+  line = $0
+  ll = tolower($0)
+
+  # time(1) format: real XmYs
+  if (match(ll, /^real[[:space:]]*([0-9]+)m([0-9.]+)s/, m)) {
+    ms = (m[1]*60 + m[2]) * 1000
+    update(ms, 72)
+  }
+
+  # Capture "Execution time summary" table: first number on next non-empty line
+  if (ll ~ /execution[[:space:]]+time[[:space:]]+summary/) { summary_next = 2; next }
+  if (summary_next > 0) {
+    if (match(ll, /^[[:space:]]*([0-9]+(\.[0-9]+)?)/, m)) {
+      ms = (m[1]+0) * 1000
+      update(ms, 50)
+      summary_next = 0
+    } else {
+      summary_next--
+    }
+  }
+
+  # High-priority explicit totals
+  if (ll ~ /total[[:space:]]+(running[[:space:]]+)?time/) {
+    ms = get_ms_from_line(line, 1)
+    if (ms >= 0) update(ms, 100)
+  } else if (ll ~ /total[[:space:]]+elapsed[[:space:]]+time/) {
+    ms = get_ms_from_line(line, 1)
+    if (ms >= 0) update(ms, 95)
+  } else if (ll ~ /(end[- ]to[- ]end|end to end|end2end)/ && ll ~ /(runtime|time|latency)/) {
+    ms = get_ms_from_line(line, 1)
+    if (ms >= 0) update(ms, 88)
+  } else if (ll ~ /(^|[^a-z])overall[[:space:]]+(runtime|time|elapsed)/) {
+    ms = get_ms_from_line(line, 1)
+    if (ms >= 0) update(ms, 90)
+  } else if (ll ~ /(wall[ -]?clock|wall[ -]?time)/) {
+    ms = get_ms_from_line(line, 1)
+    if (ms >= 0) update(ms, 85)
+  } else if (ll ~ /(average|avg|mean)[^0-9]*(runtime|time|latency)/) {
+    ms = get_ms_from_line(line, 1)
+    if (ms >= 0) update(ms, 80)
+  } else if (ll ~ /(^|[^a-z])elapsed([^a-z]|$)/ || ll ~ /elapsed[[:space:]]+time/) {
+    ms = get_ms_from_line(line, 1)
+    if (ms >= 0) update(ms, 70)
+  } else if (ll ~ /execution[[:space:]]+time[^a-z]/ && ll !~ /summary/) {
+    ms = get_ms_from_line(line, 0)
+    if (ms < 0) ms = get_ms_from_line(line, 1)
+    if (ms >= 0) update(ms, 25)
+  } else if (ll ~ /(^|[^a-z])total([^a-z]|$)/ && ll ~ /time/) {
+    ms = get_ms_from_line(line, 1)
+    if (ms >= 0) update(ms, 60)
+  }
+
+  # Very low-priority build/config durations like "(5.8s)"
+  if (match(ll, /\(([0-9]+(\.[0-9]+)?)s\)/, m)) {
+    ms = (m[1]+0) * 1000
+    update(ms, 1)
+  }
+}
+END {
+  if (best_p > 0 && best >= 0) {
+    printf("%.0f\n", best)
+  }
+}
+' "$logfile")
+
+if [ -n "$ms" ]; then
+  echo "runtime_ms=$ms"
+else
+  echo "Error: could not find a runtime in the log." >&2
+  exit 1
+fi
+```
