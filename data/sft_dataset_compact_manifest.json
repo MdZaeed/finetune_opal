@@ -1,0 +1,37 @@
+{
+  "input_records": 103,
+  "seed": 42,
+  "skipped": {
+    "missing_required_compact_fields": 38
+  },
+  "train": {
+    "benchmarks": {
+      "accuracy": 14,
+      "shmembench": 13,
+      "sobol": 16,
+      "sw4lite": 16
+    },
+    "count": 59,
+    "generator_models": {
+      "gemini25pro": 23,
+      "gpt5": 36
+    },
+    "repair_records": 0
+  },
+  "usable_examples": 65,
+  "val": {
+    "benchmarks": {
+      "accuracy": 1,
+      "shmembench": 1,
+      "sobol": 3,
+      "sw4lite": 1
+    },
+    "count": 6,
+    "generator_models": {
+      "gemini25pro": 4,
+      "gpt5": 2
+    },
+    "repair_records": 0
+  },
+  "val_fraction": 0.1
+}
